@@ -1,0 +1,62 @@
+name = "plugin-files"
+version = "0.2.0"
+description = "File storage + a standalone file-browser UI, with agent file tools."
+entry = "plugin_files"
+sdk_version = "0"
+license = "MIT"
+tags = ["files", "storage", "ui"]
+readme = """
+# plugin-files
+
+Gives Luna a disk-backed file store, agent file tools, and a **Files** sidebar
+item with a standalone file-browser UI (list, upload, preview, rename, delete).
+
+Tools: `file_list`, `file_read`, `file_write`, `file_mkdir`, `file_delete`,
+`file_move`. Routes are auth-gated via the SDK (`get_current_user`); the UI is
+served from the plugin's own `ui/` dir. Built against `luna_sdk` v0 — no
+`import luna.*`.
+
+Config (env): `LUNA_FILES_ROOT` (default `~/.luna/files`),
+`LUNA_FILES_MAX_SIZE_GB` (5), `LUNA_FILES_MAX_FILE_MB` (50).
+
+Source: https://github.com/huemorgan/plugin-files
+"""
+
+[requires]
+tools = 6
+
+[[tools]]
+name = "file_list"
+description = "List files and folders in a directory."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "file_read"
+description = "Read a text file's content."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "file_write"
+description = "Write text content to a file."
+policy = "prompt_always"
+risk_level = "low"
+
+[[tools]]
+name = "file_mkdir"
+description = "Create a directory (and parents)."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "file_delete"
+description = "Delete a file or directory."
+policy = "prompt_always"
+risk_level = "high"
+
+[[tools]]
+name = "file_move"
+description = "Move or rename a file or directory."
+policy = "prompt_always"
+risk_level = "low"

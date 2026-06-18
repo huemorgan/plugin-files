@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Files — Luna</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="header">
+      <div class="header-left">
+        <span class="header-title">Files</span>
+        <span id="breadcrumb" class="breadcrumb">/</span>
+      </div>
+      <div class="header-right">
+        <div id="usage" class="usage-bar"></div>
+        <button id="btn-upload" class="btn btn-primary" title="Upload file">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+          Upload
+        </button>
+        <button id="btn-mkdir" class="btn" title="New folder">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+    </header>
+    <div id="main">
+      <div id="tree-pane">
+        <div id="tree" class="tree"></div>
+        <div id="drop-zone" class="drop-zone">Drop files here to upload</div>
+      </div>
+      <div id="content-pane">
+        <div id="content-placeholder" class="placeholder">Select a file to preview</div>
+        <div id="content-viewer" class="viewer hidden"></div>
+      </div>
+    </div>
+    <footer id="status-bar">
+      <span id="status-text">Ready</span>
+    </footer>
+  </div>
+  <input type="file" id="file-input" multiple style="display:none">
+  <script src="app.js"></script>
+</body>
+</html>
