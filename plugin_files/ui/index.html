@@ -36,6 +36,14 @@
     </div>
     <footer id="status-bar">
       <span id="status-text">Ready</span>
+      <span id="storage-indicator" class="storage-indicator hidden">
+        <span id="storage-dot" class="storage-dot"></span>
+        <span id="storage-label"></span>
+        <span id="storage-info" class="storage-info" tabindex="0" role="button" aria-label="What does this storage type mean?">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <span id="storage-tooltip" class="storage-tooltip"></span>
+        </span>
+      </span>
     </footer>
   </div>
   <input type="file" id="file-input" multiple style="display:none">

@@ -9,16 +9,17 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from luna_sdk import get_current_user
 
-from .storage import make_storage_from_env
+from .backends import make_storage_from_env
 
 
 def register_routes(app, ctx):
     router = APIRouter(prefix="/api/p/plugin-files", tags=["files"])
 
     # Build storage from the same env config the plugin entry uses (no registry
-    # lookup — keeps routes decoupled from the loader). Disk storage is
-    # stateless over its root, so this instance is equivalent to the entry's.
-    _store = make_storage_from_env()
+    # lookup — keeps routes decoupled from the loader). Backends are stateless
+    # over their store (disk root / bucket / shared engine), so this instance is
+    # equivalent to the entry's. `ctx` lets the `db` backend reach ctx.engine.
+    _store = make_storage_from_env(ctx)
 
     def _storage():
         return _store
@@ -141,6 +142,20 @@ def register_routes(app, ctx):
         if storage is None:
             raise HTTPException(503, "plugin-files not loaded")
         return await storage.usage()
+
+    @router.get("/status")
+    async def storage_status(user=Depends(get_current_user)):
+        # 002: the durability "state" (backend, durable?, location, caps) + usage,
+        # for the Files-UI banner.
+        storage = _storage()
+        if storage is None:
+            raise HTTPException(503, "plugin-files not loaded")
+        out = storage.state().to_dict()
+        try:
+            out.update(await storage.usage())
+        except Exception:  # noqa: BLE001
+            pass
+        return out
 
     # Serve the standalone plugin UI
     ui_dir = Path(__file__).parent / "ui"

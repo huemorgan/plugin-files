@@ -1,29 +1,42 @@
 name = "plugin-files"
-version = "0.2.0"
+version = "0.6.0"
 description = "File storage + a standalone file-browser UI, with agent file tools."
 entry = "plugin_files"
 sdk_version = "0"
 license = "MIT"
+provider = "storage"
 tags = ["files", "storage", "ui"]
 readme = """
 # plugin-files
 
-Gives Luna a disk-backed file store, agent file tools, and a **Files** sidebar
-item with a standalone file-browser UI (list, upload, preview, rename, delete).
+Gives Luna a file store, agent file tools, and a **Files** sidebar item with a
+standalone file-browser UI (list, upload, preview, rename, delete). It is the
+sanctioned `StorageProvider` (registry key `storage`) any plugin persists bytes
+through.
+
+**Pluggable backends (002).** One plugin, four backends behind a single seam —
+the plugin reports its own durability via `file_storage_status`:
+- `local` — local disk (dev; ephemeral on containers).
+- `fly` — local disk on a mounted **Fly volume** (fast NVMe, persists across deploys).
+- `object` — S3-compatible object storage: **Tigris** (Fly-native) or **Cloudflare R2**
+  (durable, machine-independent; not a code workspace — no in-place edits).
+- `db` — bytes in the per-agent Postgres (`plugin_files_blobs`); zero-infra durable.
 
 Tools: `file_list`, `file_read`, `file_write`, `file_mkdir`, `file_delete`,
-`file_move`. Routes are auth-gated via the SDK (`get_current_user`); the UI is
-served from the plugin's own `ui/` dir. Built against `luna_sdk` v0 — no
-`import luna.*`.
+`file_move`, `file_storage_status`. Routes are auth-gated via the SDK
+(`get_current_user`); the UI is served from the plugin's own `ui/` dir. Built
+against `luna_sdk` v0 — no `import luna.*`.
 
-Config (env): `LUNA_FILES_ROOT` (default `~/.luna/files`),
-`LUNA_FILES_MAX_SIZE_GB` (5), `LUNA_FILES_MAX_FILE_MB` (50).
+Config (env): `LUNA_FILES_BACKEND` (`auto`|`local`|`fly`|`object`|`db`),
+`LUNA_FILES_ROOT` (default `~/.luna/files`), `LUNA_FILES_DURABLE` (declare a
+durable disk), `LUNA_FILES_MAX_SIZE_GB`, `LUNA_FILES_MAX_FILE_MB`,
+`LUNA_FILES_S3_*` (endpoint/key/secret/bucket/prefix for `object`).
 
 Source: https://github.com/huemorgan/plugin-files
 """
 
 [requires]
-tools = 6
+tools = 7
 
 [[tools]]
 name = "file_list"
@@ -59,4 +72,10 @@ risk_level = "high"
 name = "file_move"
 description = "Move or rename a file or directory."
 policy = "prompt_always"
+risk_level = "low"
+
+[[tools]]
+name = "file_storage_status"
+description = "Report the file store's backend, durability, location and usage."
+policy = "auto_approve"
 risk_level = "low"

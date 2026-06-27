@@ -11,7 +11,8 @@ from typing import Any
 
 from luna_sdk import LunaPlugin, PluginContext, PluginManifest, SidebarSection, ToolDef
 
-from .storage import make_storage_from_env
+from .backends import make_storage_from_env
+from .provider import FilesStorageProvider
 
 log = logging.getLogger("plugin-files")
 
@@ -19,9 +20,13 @@ log = logging.getLogger("plugin-files")
 class FilesPlugin(LunaPlugin):
     manifest = PluginManifest(
         name="plugin-files",
-        version="0.2.0",
+        version="0.6.0",
         description="File storage and browser.",
         category="system",
+        # 001: plugin-files is the StorageProvider — the one sanctioned way any
+        # plugin persists bytes (registry key "storage", same field plugin-memory
+        # / plugin-vault use to advertise "memory" / "vault").
+        provider="storage",
         sidebar_sections=[
             SidebarSection(id="files", label="Files", icon="folder", sort_order=35),
         ],
@@ -32,8 +37,33 @@ class FilesPlugin(LunaPlugin):
         self.storage: Any | None = None
 
     async def on_load(self, ctx: PluginContext) -> None:
-        self.storage = make_storage_from_env()
+        # 002: pick the backend from env (local | fly | object | db), passing ctx
+        # so the `db` backend can use the per-agent Postgres (ctx.engine / sessions).
+        self.storage = make_storage_from_env(ctx)
         storage = self.storage
+        state = storage.state()
+
+        # 002: the `db` backend owns one table (plugin_files_blobs). Create it
+        # idempotently against ctx.engine (E4 — isolated metadata, never touches core).
+        if state.backend == "db" and getattr(ctx, "engine", None) is not None:
+            from .models import ALL_TABLES
+
+            async with ctx.engine.begin() as conn:
+                for table in ALL_TABLES:
+                    await conn.run_sync(table.create, checkfirst=True)
+
+        # 001: register the StorageProvider so any plugin can persist via
+        # ctx.storage into a per-plugin folder (e.g. browser → /browser).
+        # Guarded for older cores without a provider registry; replace-or-register
+        # mirrors plugin-memory so a reload doesn't trip the "two impls" guard.
+        registry = getattr(ctx, "provider_registry", None)
+        if registry is not None:
+            provider = FilesStorageProvider(storage)
+            if registry.has("storage"):
+                registry.replace("storage", provider)
+            else:
+                registry.register("storage", provider)
+            log.info("plugin-files registered StorageProvider (key=storage)")
 
         async def _file_list(path: str = "/") -> dict[str, Any]:
             entries = await storage.list(path)
@@ -97,6 +127,16 @@ class FilesPlugin(LunaPlugin):
                 return {"error": f"Source not found: {src}"}
             return {"moved": True, "from": src, "to": entry.path}
 
+        async def _file_storage_status() -> dict[str, Any]:
+            # 002: the documented durability "state" — backend kind, durable?,
+            # location, capabilities, and live usage. Answers "is my data safe here?".
+            s = storage.state().to_dict()
+            try:
+                s.update(await storage.usage())
+            except Exception:  # noqa: BLE001 — usage is best-effort, never fail status
+                pass
+            return s
+
         ctx.tool_registry.register(self.manifest.name, ToolDef(
             name="file_list", description="List files and folders in a directory.",
             parameters={"type": "object", "properties": {"path": {"type": "string", "description": "Directory path (default: /)"}}, "required": []},
@@ -133,4 +173,14 @@ class FilesPlugin(LunaPlugin):
             policy="prompt_always", risk_level="low",
         ), _file_move)
 
-        log.info("plugin-files loaded (root=%s)", storage.root)
+        ctx.tool_registry.register(self.manifest.name, ToolDef(
+            name="file_storage_status",
+            description="Report the file store's backend, durability, location and usage.",
+            parameters={"type": "object", "properties": {}, "required": []},
+            policy="auto_approve", risk_level="low",
+        ), _file_storage_status)
+
+        log.info(
+            "plugin-files loaded (backend=%s durable=%s location=%s)",
+            state.backend, state.durable, state.location,
+        )
