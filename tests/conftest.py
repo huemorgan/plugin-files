@@ -73,6 +73,20 @@ def _install_luna_sdk_stub() -> None:
     mod.PluginManifest = PluginManifest
     mod.PluginContext = PluginContext
     mod.LunaPlugin = LunaPlugin
+
+    # The `db` storage backend's ORM model imports `UUID` + `declarative_base`
+    # from luna_sdk. Real Luna re-exports SQLAlchemy's cross-dialect UUID type and
+    # declarative base; mirror that here so the db-backend tests can run. Guarded
+    # so plugins/tests without SQLAlchemy installed still import the stub.
+    try:
+        from sqlalchemy import Uuid as _Uuid
+        from sqlalchemy.orm import declarative_base as _declarative_base
+
+        mod.UUID = _Uuid
+        mod.declarative_base = _declarative_base
+    except Exception:  # pragma: no cover - SQLAlchemy absent → db tests skip
+        pass
+
     sys.modules["luna_sdk"] = mod
 
 

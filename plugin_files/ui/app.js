@@ -1,16 +1,28 @@
-// Luna file browser — standalone plugin UI (003: seamless + working previews)
+// Luna file browser — standalone plugin UI.
 // Receives auth token from the shell via postMessage.
 //
-// Two design rules that fix the old "reload on every click" + broken images:
+// Design rules:
 //   1. State-driven, synchronous render. Directory listings are fetched ONCE
 //      and cached; selecting a file or toggling a folder re-renders from memory
 //      with no network call and no flicker. The network is only touched on first
 //      load, expanding an *uncached* folder, or a mutation.
-//   2. Auth-correct previews. The /read route is Bearer-gated, so a bare
-//      <img src>/<iframe src>/<a href> 401s. We fetch bytes WITH the token and
-//      hand the viewer a blob: object URL instead.
+//   2. Mount-relative API base. The base is derived from this script's own URL,
+//      never hardcoded, so it keeps any host mount prefix (luna-service serves
+//      tenants under /a/<slug>/...). A leading-slash path would 404 there.
+//   3. Auth-correct previews. JSON/text calls send `Authorization: Bearer` via
+//      fetch. Tag-loaded bytes (<img>/<iframe>/<a> for image/PDF/download) can't
+//      set headers, so they hit the /read route with a ?token= query param
+//      (core's auth dependency accepts either). Everything stays prefixed.
 
-const API = '/api/p/plugin-files';
+// API base is derived from THIS script's own URL, NOT hardcoded — so it keeps
+// any host mount prefix. luna-service serves each tenant under /a/<slug>/..., so
+// a leading-slash '/api/p/plugin-files' would resolve to the host root and 404.
+// app.js lives at <mount>/api/p/plugin-files/ui/app.js → the API root is one
+// level up from ui/. document.currentScript is valid during this classic-script
+// initial evaluation; document.baseURI is the fallback.
+const _SELF = (document.currentScript && document.currentScript.src)
+  || new URL('app.js', document.baseURI).href;
+const API = new URL('..', _SELF).href.replace(/\/+$/, '');
 let TOKEN = '';
 let currentPath = '/';
 let selectedFile = null;
@@ -18,9 +30,16 @@ let selectedFile = null;
 // ---- state cache (the seamless fix) ----------------------------------------
 const cache = new Map();          // listKey -> entries[]   (a folder's children)
 const expandedDirs = new Set(['/']);
-let lastObjUrl = null;            // revoked on navigation to avoid blob leaks
 
 function listKey(path) { return path && path !== '/' ? path : '/'; }
+
+// Tag-loaded endpoints (<img>/<iframe>/<a>) can't set an Authorization header,
+// so the bytes route also accepts the JWT as a ?token= query param (core's auth
+// dependency reads either). Build a fully-prefixed, tokened URL for those tags.
+function readUrl(path) {
+  const q = TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : '';
+  return `${API}/read/${encodeURIComponent(path)}${q}`;
+}
 
 // Auth
 window.addEventListener('message', (e) => {
@@ -48,21 +67,6 @@ async function api(method, path, body) {
   const res = await fetch(`${API}${path}`, opts);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res;
-}
-
-// Fetch a file's bytes WITH auth and return a blob: object URL. The caller owns
-// revocation (we revoke `lastObjUrl` on each navigation).
-async function authedObjectUrl(path) {
-  const res = await fetch(`${API}/read/${encodeURIComponent(path)}`, {
-    headers: { 'Authorization': `Bearer ${TOKEN}` },
-  });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  const blob = await res.blob();
-  return URL.createObjectURL(blob);
-}
-
-function releaseObjUrl() {
-  if (lastObjUrl) { URL.revokeObjectURL(lastObjUrl); lastObjUrl = null; }
 }
 
 // ---- file type detection ---------------------------------------------------
@@ -174,52 +178,43 @@ async function showFile(entry) {
   placeholder.classList.add('hidden');
   viewer.classList.remove('hidden');
   viewer.innerHTML = '<div class="placeholder">Loading…</div>';
-  releaseObjUrl();
 
   const type = fileType(entry.name);
   const status = document.getElementById('status-text');
   status.textContent = `${entry.path} · ${formatSize(entry.size_bytes)} · ${entry.mime_type || 'unknown type'}`;
 
-  // Images — fetch WITH auth, show via blob URL, fit-to-pane + click to zoom.
+  // Images — load the tag directly from the tokened, mount-prefixed bytes URL.
   if (type === 'image') {
-    try {
-      const url = await authedObjectUrl(entry.path);
-      lastObjUrl = url;
-      viewer.innerHTML = `
-        <div class="img-toolbar">
-          <span class="img-name">${escapeHtml(entry.name)}</span>
-          <span class="img-dim" id="img-dim"></span>
-          <span class="img-spacer"></span>
-          <button class="btn" id="img-download">Download</button>
-        </div>
-        <div class="image-view" id="image-view" title="Click to toggle actual size">
-          <img id="preview-img" alt="${escapeHtml(entry.name)}" />
-        </div>`;
-      const img = document.getElementById('preview-img');
-      img.addEventListener('load', () => {
-        const dim = document.getElementById('img-dim');
-        if (dim && img.naturalWidth) dim.textContent = `${img.naturalWidth}×${img.naturalHeight}`;
-      });
-      img.src = url;
-      document.getElementById('image-view').addEventListener('click', () => {
-        document.getElementById('image-view').classList.toggle('actual-size');
-      });
-      document.getElementById('img-download').addEventListener('click', () => downloadFile(entry));
-    } catch {
+    const url = readUrl(entry.path);
+    viewer.innerHTML = `
+      <div class="img-toolbar">
+        <span class="img-name">${escapeHtml(entry.name)}</span>
+        <span class="img-dim" id="img-dim"></span>
+        <span class="img-spacer"></span>
+        <button class="btn" id="img-download">Download</button>
+      </div>
+      <div class="image-view" id="image-view" title="Click to toggle actual size">
+        <img id="preview-img" alt="${escapeHtml(entry.name)}" />
+      </div>`;
+    const img = document.getElementById('preview-img');
+    img.addEventListener('load', () => {
+      const dim = document.getElementById('img-dim');
+      if (dim && img.naturalWidth) dim.textContent = `${img.naturalWidth}×${img.naturalHeight}`;
+    });
+    img.addEventListener('error', () => {
       viewer.innerHTML = '<div class="placeholder">Failed to load image</div>';
-    }
+    });
+    img.src = url;
+    document.getElementById('image-view').addEventListener('click', () => {
+      document.getElementById('image-view').classList.toggle('actual-size');
+    });
+    document.getElementById('img-download').addEventListener('click', () => downloadFile(entry));
     return;
   }
 
-  // PDF — same auth root cause; serve the blob to an iframe.
+  // PDF — same tokened URL straight into the iframe.
   if (type === 'pdf') {
-    try {
-      const url = await authedObjectUrl(entry.path);
-      lastObjUrl = url;
-      viewer.innerHTML = `<iframe src="${url}"></iframe>`;
-    } catch {
-      viewer.innerHTML = '<div class="placeholder">Failed to load PDF</div>';
-    }
+    viewer.innerHTML = `<iframe src="${readUrl(entry.path)}"></iframe>`;
     return;
   }
 
@@ -267,20 +262,15 @@ async function showFile(entry) {
   document.getElementById('dl-btn').addEventListener('click', () => downloadFile(entry));
 }
 
-// Authed download: fetch the bytes with the token, then save via a temp <a>.
-async function downloadFile(entry) {
-  try {
-    const url = await authedObjectUrl(entry.path);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = entry.name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-  } catch {
-    setStatus('Download failed');
-  }
+// Download: same tokened, mount-prefixed URL via a temp <a>. Same-origin, so the
+// `download` attribute names the saved file.
+function downloadFile(entry) {
+  const a = document.createElement('a');
+  a.href = readUrl(entry.path);
+  a.download = entry.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 // ---- cache invalidation (only on mutations) --------------------------------
@@ -294,7 +284,6 @@ function invalidateParent(path) { cache.delete(listKey(parentDir(path))); }
 // mutations only (upload/mkdir/rename/delete) — never on a plain click.
 async function refresh() {
   cache.clear();
-  releaseObjUrl();
   await ensureDir('/');
   for (const d of expandedDirs) {
     if (d !== '/') { try { await ensureDir(d); } catch { expandedDirs.delete(d); } }
@@ -331,7 +320,6 @@ function showContextMenu(e, entry) {
     await api('DELETE', `/delete/${encodeURIComponent(entry.path)}`);
     if (selectedFile === entry.path) {
       selectedFile = null;
-      releaseObjUrl();
       document.getElementById('content-viewer').classList.add('hidden');
       document.getElementById('content-placeholder').classList.remove('hidden');
     }
