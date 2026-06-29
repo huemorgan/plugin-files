@@ -117,4 +117,4 @@ def test_manifest_declares_storage_provider() -> None:
     from plugin_files import FilesPlugin
 
     assert FilesPlugin.manifest.provider == "storage"
-    assert FilesPlugin.manifest.version == "0.6.1"
+    assert FilesPlugin.manifest.version == "0.6.2"

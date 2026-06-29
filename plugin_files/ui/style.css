@@ -162,6 +162,7 @@ footer {
   border-top: 1px solid var(--border); background: var(--bg-panel);
 }
 #status-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.version { flex-shrink: 0; color: var(--text-muted); font-size: 11px; opacity: 0.65; font-variant-numeric: tabular-nums; }
 
 /* Storage type indicator (right side of the status bar) */
 .storage-indicator {

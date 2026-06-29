@@ -1,6 +1,6 @@
 [project]
 name = "plugin-files"
-version = "0.6.1"
+version = "0.6.2"
 description = "File storage + browser UI for Luna. Built on luna_sdk v0."
 readme = "README.md"
 license = { text = "MIT" }
