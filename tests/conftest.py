@@ -68,11 +68,15 @@ def _install_luna_sdk_stub() -> None:
         def credential_slots(self) -> list:
             return []
 
+    async def get_current_user():  # pragma: no cover - dependency stand-in
+        return {"id": "test-user"}
+
     mod.ToolDef = ToolDef
     mod.SidebarSection = SidebarSection
     mod.PluginManifest = PluginManifest
     mod.PluginContext = PluginContext
     mod.LunaPlugin = LunaPlugin
+    mod.get_current_user = get_current_user
 
     # The `db` storage backend's ORM model imports `UUID` + `declarative_base`
     # from luna_sdk. Real Luna re-exports SQLAlchemy's cross-dialect UUID type and

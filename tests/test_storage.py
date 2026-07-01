@@ -82,6 +82,22 @@ class TestDiskFileStorage:
         with pytest.raises(FileNotFoundError):
             await storage.read("nope.txt")
 
+    async def test_read_range_native_slice(self, storage) -> None:
+        await storage.write("movie.bin", b"0123456789")
+        assert await storage.read_range("movie.bin", 2, 5) == b"2345"
+        assert await storage.read_range("movie.bin", 0, 0) == b"0"
+        assert await storage.read_range("movie.bin", 8, 9) == b"89"
+
+    async def test_read_range_missing_raises(self, storage) -> None:
+        with pytest.raises(FileNotFoundError):
+            await storage.read_range("nope.bin", 0, 3)
+
+    async def test_stream_chunks_concatenate_to_full(self, storage) -> None:
+        payload = b"x" * 3000
+        await storage.write("blob.bin", payload)
+        collected = b"".join([chunk async for chunk in storage.stream("blob.bin", chunk_size=1024)])
+        assert collected == payload
+
     async def test_mime_type_detection(self, storage) -> None:
         await storage.write("image.png", b"fakepng")
         entry = await storage.stat("image.png")

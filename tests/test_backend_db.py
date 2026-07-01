@@ -78,6 +78,20 @@ class TestDbBackend:
         with pytest.raises(FileNotFoundError):
             await backend.read("nope.txt")
 
+    async def test_list_direct_children_only(self, backend):
+        # Prefix-query listing must return only direct children, not descendants.
+        await backend.write("a/one.txt", b"1")
+        await backend.write("a/sub/deep.txt", b"2")
+        await backend.write("top.txt", b"3")
+        root = {e.name for e in await backend.list("/")}
+        assert root == {"a", "top.txt"}
+        a_kids = {(e.name, e.is_dir) for e in await backend.list("a")}
+        assert a_kids == {("one.txt", False), ("sub", True)}
+
+    async def test_read_range_default_slice(self, backend):
+        await backend.write("data.bin", b"0123456789")
+        assert await backend.read_range("data.bin", 3, 6) == b"3456"
+
     async def test_state_is_durable(self, backend):
         st = backend.state()
         assert st.backend == "db"

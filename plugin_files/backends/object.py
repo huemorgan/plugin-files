@@ -150,6 +150,21 @@ class ObjectBackend(StorageBackend):
             raise
         return await asyncio.to_thread(resp["Body"].read)
 
+    async def read_range(self, path: str, start: int, end: int) -> bytes:
+        # Native S3 Range so scrubbing a video pulls only the requested slice.
+        try:
+            resp = await self._call(
+                "get_object",
+                Bucket=self._bucket,
+                Key=self._key(path),
+                Range=f"bytes={start}-{end}",
+            )
+        except Exception as e:  # noqa: BLE001 — map vendor NoSuchKey to FileNotFoundError
+            if "NoSuchKey" in type(e).__name__ or "404" in str(e):
+                raise FileNotFoundError(path) from e
+            raise
+        return await asyncio.to_thread(resp["Body"].read)
+
     async def write(self, path: str, content: bytes, mime_type: str | None = None) -> FileEntry:
         if len(content) > self._max_file_bytes:
             raise ValueError(f"File too large: {len(content)} bytes (max {self._max_file_bytes})")

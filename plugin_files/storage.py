@@ -90,6 +90,26 @@ class StorageBackend(ABC):
     async def read(self, path: str) -> bytes:
         ...
 
+    async def read_range(self, path: str, start: int, end: int) -> bytes:
+        """Return the byte slice ``[start, end]`` (inclusive) of a file.
+
+        Default implementation reads the whole file then slices — correct for
+        every backend out of the box. Backends with native range support (disk
+        ``seek``, S3 ``Range=``) override this so a video scrub never loads the
+        whole file into memory. ``end`` is inclusive to mirror HTTP Range.
+        """
+        data = await self.read(path)
+        return data[start : end + 1]
+
+    async def stream(self, path: str, chunk_size: int = 1024 * 1024):
+        """Yield a file's bytes in chunks (async generator).
+
+        Default yields the whole file in one chunk (via :meth:`read`). Disk
+        overrides with a chunked file reader so large files (movies) stream
+        instead of materializing fully in memory.
+        """
+        yield await self.read(path)
+
     @abstractmethod
     async def write(self, path: str, content: bytes, mime_type: str | None = None) -> FileEntry:
         ...
@@ -200,6 +220,28 @@ class DiskFileStorage(StorageBackend):
         if not target.exists() or target.is_dir():
             raise FileNotFoundError(path)
         return target.read_bytes()
+
+    async def read_range(self, path: str, start: int, end: int) -> bytes:
+        # Native range: seek to `start`, read only the requested slice.
+        target = self._resolve(path)
+        if not target.exists() or target.is_dir():
+            raise FileNotFoundError(path)
+        length = max(0, end - start + 1)
+        with open(target, "rb") as f:
+            f.seek(start)
+            return f.read(length)
+
+    async def stream(self, path: str, chunk_size: int = 1024 * 1024):
+        # Chunked read so large files never fully materialize in memory.
+        target = self._resolve(path)
+        if not target.exists() or target.is_dir():
+            raise FileNotFoundError(path)
+        with open(target, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
 
     async def write(self, path: str, content: bytes, mime_type: str | None = None) -> FileEntry:
         if len(content) > self._max_file_bytes:

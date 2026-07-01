@@ -67,19 +67,22 @@ class DbBackend(StorageBackend):
 
     # ---- API ---------------------------------------------------------------
     async def list(self, path: str = "/") -> list[FileEntry]:
+        # Direct-children only, resolved in SQL (no full-table scan). For a
+        # subdir `foo`: rows LIKE 'foo/%' but NOT LIKE 'foo/%/%'. For the root:
+        # rows with no '/' at all.
         prefix = sanitize_rel(path)
+        if prefix:
+            base = f"{prefix}/"
+            stmt = select(FileBlobRow).where(
+                FileBlobRow.path.like(f"{base}%"),
+                ~FileBlobRow.path.like(f"{base}%/%"),
+            )
+        else:
+            stmt = select(FileBlobRow).where(~FileBlobRow.path.like("%/%"))
         async with self._sf() as session:
-            res = await session.execute(select(FileBlobRow))
+            res = await session.execute(stmt)
             rows = res.scalars().all()
-        out: list[FileEntry] = []
-        base = f"{prefix}/" if prefix else ""
-        for row in rows:
-            if prefix and not row.path.startswith(base):
-                continue
-            rest = row.path[len(base):]
-            if not rest or "/" in rest:
-                continue  # not a direct child
-            out.append(self._entry(row))
+        out = [self._entry(row) for row in rows]
         out.sort(key=lambda e: (not e.is_dir, e.name.lower()))
         return out
 
