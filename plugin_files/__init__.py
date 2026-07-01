@@ -20,7 +20,9 @@ log = logging.getLogger("plugin-files")
 class FilesPlugin(LunaPlugin):
     manifest = PluginManifest(
         name="plugin-files",
-        version="0.7.0",
+        icon="folder",
+        image="assets/icon.png",
+        version="0.7.1",
         description="File storage and browser.",
         category="system",
         # 001: plugin-files is the StorageProvider — the one sanctioned way any
