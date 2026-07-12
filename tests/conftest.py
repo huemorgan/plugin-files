@@ -42,6 +42,9 @@ def _install_luna_sdk_stub() -> None:
     class PluginManifest:
         name: str
         version: str
+        shown_name: str = ""
+        icon: str = ""
+        image: str = ""
         description: str = ""
         category: str = "user"
         provider: str | None = None
@@ -49,6 +52,13 @@ def _install_luna_sdk_stub() -> None:
         tools: list = field(default_factory=list)
         sidebar_sections: list = field(default_factory=list)
         routes_module: str | None = None
+
+    @dataclass
+    class SkillDef:
+        name: str
+        description: str = ""
+        body: str = ""
+        tools: list = field(default_factory=list)
 
     class PluginContext:  # pragma: no cover - structural stand-in
         tool_registry: Any
@@ -72,6 +82,7 @@ def _install_luna_sdk_stub() -> None:
         return {"id": "test-user"}
 
     mod.ToolDef = ToolDef
+    mod.SkillDef = SkillDef
     mod.SidebarSection = SidebarSection
     mod.PluginManifest = PluginManifest
     mod.PluginContext = PluginContext

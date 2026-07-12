@@ -11,6 +11,11 @@ from typing import Any
 
 from luna_sdk import LunaPlugin, PluginContext, PluginManifest, SidebarSection, ToolDef
 
+try:  # cores with the skill system export it
+    from luna_sdk import SkillDef
+except ImportError:  # pragma: no cover - older core: tools register ungated
+    SkillDef = None
+
 from .backends import make_storage_from_env
 from .provider import FilesStorageProvider
 
@@ -23,7 +28,7 @@ class FilesPlugin(LunaPlugin):
         shown_name="Files",
         icon="folder",
         image="assets/icon.png",
-        version="0.7.2",
+        version="0.8.0",
         description="File storage and browser.",
         category="system",
         # 001: plugin-files is the StorageProvider — the one sanctioned way any
@@ -140,48 +145,102 @@ class FilesPlugin(LunaPlugin):
                 pass
             return s
 
-        ctx.tool_registry.register(self.manifest.name, ToolDef(
+        # 0.8.0: all 7 tools ride behind the file-storage skill — file work is
+        # occasional, and 7 schemas in every turn's prompt is pure flooding.
+        # Cores without a skill registry get the tools ungated.
+        gate = getattr(ctx, "skill_registry", None) is not None and SkillDef is not None
+
+        def _register(defn: ToolDef, handler: Any) -> None:
+            nonlocal gate
+            if gate:
+                try:
+                    ctx.tool_registry.register(
+                        self.manifest.name, defn, handler, skill_gated=True
+                    )
+                    return
+                except TypeError:  # core knows skills but not the kwarg
+                    gate = False
+            ctx.tool_registry.register(self.manifest.name, defn, handler)
+
+        _register(ToolDef(
             name="file_list", description="List files and folders in a directory.",
             parameters={"type": "object", "properties": {"path": {"type": "string", "description": "Directory path (default: /)"}}, "required": []},
             policy="auto_approve", risk_level="low",
         ), _file_list)
 
-        ctx.tool_registry.register(self.manifest.name, ToolDef(
+        _register(ToolDef(
             name="file_read", description="Read a text file's content.",
             parameters={"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
             policy="auto_approve", risk_level="low",
         ), _file_read)
 
-        ctx.tool_registry.register(self.manifest.name, ToolDef(
+        _register(ToolDef(
             name="file_write", description="Write text content to a file. Creates parent directories if needed.",
             parameters={"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]},
             policy="prompt_always", risk_level="low",
         ), _file_write)
 
-        ctx.tool_registry.register(self.manifest.name, ToolDef(
+        _register(ToolDef(
             name="file_mkdir", description="Create a directory (and any parent directories).",
             parameters={"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
             policy="auto_approve", risk_level="low",
         ), _file_mkdir)
 
-        ctx.tool_registry.register(self.manifest.name, ToolDef(
+        _register(ToolDef(
             name="file_delete", description="Delete a file or directory. Requires owner approval.",
             parameters={"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
             policy="prompt_always", risk_level="high",
         ), _file_delete)
 
-        ctx.tool_registry.register(self.manifest.name, ToolDef(
+        _register(ToolDef(
             name="file_move", description="Move or rename a file or directory.",
             parameters={"type": "object", "properties": {"src": {"type": "string"}, "dst": {"type": "string"}}, "required": ["src", "dst"]},
             policy="prompt_always", risk_level="low",
         ), _file_move)
 
-        ctx.tool_registry.register(self.manifest.name, ToolDef(
+        _register(ToolDef(
             name="file_storage_status",
             description="Report the file store's backend, durability, location and usage.",
             parameters={"type": "object", "properties": {}, "required": []},
             policy="auto_approve", risk_level="low",
         ), _file_storage_status)
+
+        if gate:
+            try:
+                ctx.skill_registry.unregister_plugin(self.manifest.name)
+            except Exception:  # noqa: BLE001 — stale-sweep is best effort
+                pass
+            ctx.skill_registry.register(
+                self.manifest.name,
+                SkillDef(
+                    name="file-storage",
+                    description=(
+                        "Browse, read, write, move, and delete files in the "
+                        "owner's file store. Load when the owner mentions "
+                        "their files or you need to save/read a document; the "
+                        "file_* tools unlock on your next turn."
+                    ),
+                    body=(
+                        "# File storage\n\n"
+                        "Tools (unlock on your NEXT turn after loading this "
+                        "skill): file_list, file_read, file_write, "
+                        "file_mkdir, file_delete, file_move, "
+                        "file_storage_status.\n\n"
+                        "- Paths are absolute from the store root, e.g. "
+                        "`/reports/q3.md`; file_write creates parent folders.\n"
+                        "- file_read returns text up to 100 KB — larger or "
+                        "binary files are for the Files pane in the sidebar.\n"
+                        "- file_write, file_delete, and file_move raise an "
+                        "approval card for the owner.\n"
+                        "- file_storage_status answers 'is my data safe "
+                        "here?' (backend, durability, usage)."
+                    ),
+                    tools=[
+                        "file_list", "file_read", "file_write", "file_mkdir",
+                        "file_delete", "file_move", "file_storage_status",
+                    ],
+                ),
+            )
 
         log.info(
             "plugin-files loaded (backend=%s durable=%s location=%s)",
