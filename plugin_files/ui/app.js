@@ -327,14 +327,47 @@ function skeleton() {
   return `<div class="skeleton"><div class="sk-bar"></div><div class="sk-block"></div></div>`;
 }
 
+// Flat line icons — one stroke weight, one 24-grid, always currentColor so a
+// button's hover state carries its glyph with it. Paths only; ico() wraps.
+const ICON_PATHS = {
+  preview: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/>',
+  source: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+  save: '<path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
+  share: '<path d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>',
+  reader: '<path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M21 14v5a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h5"/>',
+  download: '<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+  open: '<path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+  plus: '<line x1="12" y1="6" x2="12" y2="18"/><line x1="6" y1="12" x2="18" y2="12"/>',
+  minus: '<line x1="6" y1="12" x2="18" y2="12"/>',
+  fit: '<polyline points="9 3 3 3 3 9"/><polyline points="15 3 21 3 21 9"/><polyline points="21 15 21 21 15 21"/><polyline points="3 15 3 21 9 21"/>',
+  actual: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="12" x2="21" y2="12"/>',
+  rotate: '<polyline points="21 4 21 10 15 10"/><path d="M20.5 14a9 9 0 11-2.6-8.4L21 8"/>',
+  print: '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>',
+  close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+};
+
+function ico(name) {
+  return `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
+    aria-hidden="true">${ICON_PATHS[name] || ''}</svg>`;
+}
+
 function toolbar(entry, extra = '') {
+  const kind = detectKind(entry);
   return `
     <div class="pv-toolbar">
-      <span class="pv-name">${escapeHtml(entry.name)}</span>
+      <span class="pv-file">
+        <svg class="ico pv-kind" viewBox="0 0 24 24" fill="none" stroke="${fileColor(kind)}"
+          stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
+          aria-hidden="true">${kindGlyph(kind)}</svg>
+        <span class="pv-name">${escapeHtml(entry.name)}</span>
+      </span>
       <span class="pv-size">${formatSize(entry.size_bytes)}</span>
       <span class="pv-spacer"></span>
       ${extra}
-      <button class="btn pv-download">Download</button>
+      <button class="btn pv-download" title="Download this file">${ico('download')}<span>Download</span></button>
     </div>`;
 }
 
@@ -370,14 +403,14 @@ const PREVIEWERS = {
     viewer.innerHTML = toolbar(entry, `
       <span class="pv-dim" id="pv-dim"></span>
       <div class="seg" role="group" aria-label="Zoom">
-        <button class="seg-btn" id="zoom-out" title="Zoom out (−)">−</button>
+        <button class="seg-btn seg-icon" id="zoom-out" title="Zoom out (−)" aria-label="Zoom out">${ico('minus')}</button>
         <span class="seg-read" id="zoom-read">100%</span>
-        <button class="seg-btn" id="zoom-in" title="Zoom in (+)">+</button>
+        <button class="seg-btn seg-icon" id="zoom-in" title="Zoom in (+)" aria-label="Zoom in">${ico('plus')}</button>
       </div>
-      <button class="btn" id="zoom-fit" title="Fit to window (0)">Fit</button>
-      <button class="btn" id="zoom-one" title="Actual size (1)">1:1</button>
-      <button class="btn" id="img-rotate" title="Rotate 90°">Rotate</button>
-      <button class="btn" id="img-open" title="Open in a new tab">Open</button>`) +
+      <button class="btn" id="zoom-fit" title="Fit to window (0)">${ico('fit')}<span>Fit</span></button>
+      <button class="btn" id="zoom-one" title="Actual size (1)">${ico('actual')}<span>1:1</span></button>
+      <button class="btn" id="img-rotate" title="Rotate 90°">${ico('rotate')}<span>Rotate</span></button>
+      <button class="btn" id="img-open" title="Open in a new tab">${ico('open')}<span>Open</span></button>`) +
       `<div class="image-view" id="image-view"><img id="preview-img" alt="${escapeHtml(entry.name)}" draggable="false"></div>`;
     wireDownload(viewer, entry);
 
@@ -471,7 +504,9 @@ const PREVIEWERS = {
     let showingSource = false;
     const text = await authedText(entry.path);
     const render = () => {
-      viewer.innerHTML = toolbar(entry, `<button class="btn pv-toggle">${showingSource ? 'Preview' : 'Source'}</button>`);
+      viewer.innerHTML = toolbar(entry, showingSource
+        ? `<button class="btn pv-toggle">${ico('preview')}<span>Preview</span></button>`
+        : `<button class="btn pv-toggle">${ico('source')}<span>Source</span></button>`);
       const body = document.createElement('div');
       if (showingSource) {
         body.className = 'code-view';
@@ -512,10 +547,10 @@ const PREVIEWERS = {
     const render = () => {
       viewer.innerHTML = toolbar(entry, `
         <div class="seg" role="group" aria-label="View mode">
-          <button class="seg-btn ${mode === 'preview' ? 'on' : ''}" data-mode="preview">Preview</button>
-          <button class="seg-btn ${mode === 'source' ? 'on' : ''}" data-mode="source">Source</button>
+          <button class="seg-btn ${mode === 'preview' ? 'on' : ''}" data-mode="preview">${ico('preview')}<span>Preview</span></button>
+          <button class="seg-btn ${mode === 'source' ? 'on' : ''}" data-mode="source">${ico('source')}<span>Source</span></button>
         </div>
-        <button class="btn pv-open" title="Open in a new tab">Open</button>`);
+        <button class="btn pv-open" title="Open in a new tab">${ico('open')}<span>Open</span></button>`);
       if (mode === 'source') {
         const body = document.createElement('div');
         body.className = 'code-view';
@@ -550,13 +585,13 @@ const PREVIEWERS = {
     const render = () => {
       const actions = `
         <div class="seg" role="group" aria-label="View mode">
-          <button class="seg-btn ${mode === 'preview' ? 'on' : ''}" data-mode="preview">Preview</button>
-          <button class="seg-btn ${mode === 'edit' ? 'on' : ''}" data-mode="edit">Edit</button>
+          <button class="seg-btn ${mode === 'preview' ? 'on' : ''}" data-mode="preview">${ico('preview')}<span>Preview</span></button>
+          <button class="seg-btn ${mode === 'edit' ? 'on' : ''}" data-mode="edit">${ico('edit')}<span>Edit</span></button>
         </div>
         <span class="pv-dirty ${draft === text ? 'hidden' : ''}" title="Unsaved changes">Unsaved</span>
-        ${mode === 'edit' ? '<button class="btn btn-primary pv-save">Save</button>' : ''}
-        <button class="btn pv-share" title="Publish a public link to this document">Share</button>
-        <button class="btn pv-reader" title="Open in a full reading window">Reader</button>`;
+        ${mode === 'edit' ? `<button class="btn btn-primary pv-save">${ico('save')}<span>Save</span></button>` : ''}
+        <button class="btn pv-share" title="Publish a public link to this document">${ico('share')}<span>Share</span></button>
+        <button class="btn pv-reader" title="Open in a full reading window">${ico('reader')}<span>Reader</span></button>`;
       viewer.innerHTML = toolbar(entry, actions);
 
       if (mode === 'edit') {
@@ -782,8 +817,8 @@ async function readerOverlay(path) {
     <header class="rd-bar">
       <span class="rd-title">${escapeHtml(path.split('/').pop())}</span>
       <span class="rd-spacer"></span>
-      <button class="btn rd-btn ov-print" title="Print or save as PDF">Print</button>
-      <button class="btn rd-btn ov-close" title="Close (Esc)">Close</button>
+      <button class="btn rd-btn ov-print" title="Print or save as PDF">${ico('print')}<span>Print</span></button>
+      <button class="btn rd-btn ov-close" title="Close (Esc)">${ico('close')}<span>Close</span></button>
     </header>
     <main class="rd-main"><article class="markdown-view rd-doc"></article></main>`;
   document.body.appendChild(back);
@@ -1064,6 +1099,63 @@ function setTreeCollapsed(next) {
 document.getElementById('btn-collapse').addEventListener('click', () => setTreeCollapsed(!treeCollapsed));
 document.getElementById('rail-show').addEventListener('click', () => setTreeCollapsed(false));
 setTreeCollapsed(treeCollapsed);
+
+// ---- resize the file list --------------------------------------------------
+// One CSS variable drives the width so a drag is a single style write per frame
+// rather than a layout thrash. Clamped so the pane can never be dragged away.
+const TREE_W_DEFAULT = 280;
+const TREE_W_MIN = 180;
+let treeWidth = clampTreeWidth(Number(localStorage.getItem('luna.files.treeWidth')) || TREE_W_DEFAULT);
+
+function clampTreeWidth(px) {
+  // Never let the tree take so much that the preview stops being a preview.
+  const max = Math.max(TREE_W_MIN, Math.min(720, window.innerWidth - 320));
+  return Math.round(Math.max(TREE_W_MIN, Math.min(max, px)));
+}
+
+function setTreeWidth(px, persist = true) {
+  treeWidth = clampTreeWidth(px);
+  document.documentElement.style.setProperty('--tree-w', `${treeWidth}px`);
+  if (persist) localStorage.setItem('luna.files.treeWidth', String(treeWidth));
+}
+
+(() => {
+  const handle = document.getElementById('tree-resize');
+  const pane = document.getElementById('tree-pane');
+  let startX = 0, startW = 0;
+
+  const onMove = (e) => setTreeWidth(startW + (e.clientX - startX), false);
+  const onUp = () => {
+    handle.classList.remove('dragging');
+    document.body.classList.remove('resizing');
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    setTreeWidth(treeWidth);          // one write to storage per drag, not per frame
+  };
+
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    startX = e.clientX;
+    startW = pane.getBoundingClientRect().width;
+    handle.classList.add('dragging');
+    document.body.classList.add('resizing');
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  });
+
+  handle.addEventListener('dblclick', () => setTreeWidth(TREE_W_DEFAULT));
+  handle.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 48 : 16;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); setTreeWidth(treeWidth - step); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); setTreeWidth(treeWidth + step); }
+    else if (e.key === 'Home') { e.preventDefault(); setTreeWidth(TREE_W_DEFAULT); }
+  });
+
+  // A narrower window must not leave the tree wider than the clamp allows.
+  window.addEventListener('resize', () => setTreeWidth(treeWidth, false));
+  setTreeWidth(treeWidth, false);
+})();
 
 // ---- list / grid toggle ----------------------------------------------------
 document.getElementById('btn-view').addEventListener('click', () => {

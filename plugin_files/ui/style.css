@@ -86,7 +86,7 @@ header {
 
 /* Tree pane */
 #tree-pane {
-  width: 280px; min-width: 200px; border-right: 1px solid var(--border);
+  width: var(--tree-w, 280px); flex: 0 0 auto; border-right: 1px solid var(--border);
   display: flex; flex-direction: column; background: var(--bg-panel);
 }
 .tree { flex: 1; overflow-y: auto; padding: 8px 0; }
@@ -267,13 +267,27 @@ footer {
 @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
 
 /* Preview toolbar (shared) */
+/* The toolbar is its own surface, not a caption floating over the document —
+   a raised strip with its own background so the controls read as controls. */
 .pv-toolbar {
-  display: flex; align-items: center; gap: 12px; padding-bottom: 12px;
-  border-bottom: 1px solid var(--border); margin-bottom: 12px; flex-shrink: 0; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap;
+  padding: 8px 10px; margin-bottom: 14px;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 2px 8px rgba(0,0,0,0.25);
 }
-.pv-toolbar .pv-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.pv-toolbar .pv-file { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.pv-toolbar .pv-kind { width: 15px; height: 15px; flex-shrink: 0; }
+.pv-toolbar .pv-name {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30ch;
+}
 .pv-toolbar .pv-size, .pv-dim { font-size: 11px; color: var(--text-dim); font-family: monospace; }
-.pv-toolbar .pv-spacer { flex: 1; }
+.pv-toolbar .pv-spacer { flex: 1; min-width: 8px; }
+/* Buttons sit on the strip, so they get a surface of their own to stand on. */
+.pv-toolbar .btn { background: var(--bg); padding: 5px 10px; font-size: 12px; }
+.pv-toolbar .btn:hover { background: var(--bg-hover); border-color: rgba(255,255,255,0.14); }
+.pv-toolbar .btn-primary { background: var(--accent); }
+.pv-toolbar .seg { background: var(--bg); }
 .pv-saved { font-size: 12px; color: var(--green); }
 .pv-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--bg-hover); color: var(--text-dim); }
 .pv-badge.warn { background: rgba(245,158,11,0.15); color: var(--yellow); }
@@ -370,10 +384,12 @@ footer {
 /* Segmented control — one grammar for every "which view" choice */
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .seg-btn {
+  display: inline-flex; align-items: center; gap: 6px;
   padding: 5px 11px; font-size: 12px; background: transparent; color: var(--text-dim);
   border: none; border-right: 1px solid var(--border); cursor: pointer; font-family: inherit;
   transition: background 0.12s, color 0.12s;
 }
+.seg-icon { padding: 5px 9px; }
 .seg-btn:last-child { border-right: none; }
 .seg-btn:hover { background: var(--bg-hover); color: var(--text); }
 .seg-btn.on { background: var(--bg-active); color: var(--text); font-weight: 500; }
@@ -383,6 +399,10 @@ footer {
   font-variant-numeric: tabular-nums;
 }
 .btn-icon { padding: 6px 8px; }
+
+/* Flat line icons: one size, inherit the button's colour, never squash. */
+.ico { width: 14px; height: 14px; flex-shrink: 0; }
+.seg-btn.on .ico { color: var(--accent); }
 
 /* --- markdown: reading column + editor ----------------------------------- */
 .md-measure { max-width: 76ch; width: 100%; margin: 0 auto; padding: 4px 16px 48px; }
@@ -408,8 +428,13 @@ footer {
 }
 .markdown-view pre.has-copy:hover .code-copy { opacity: 1; }
 .code-copy:hover { color: var(--text); background: var(--bg-hover); }
+/* The global reset zeroes list padding, which put bullets, numbers and task
+   checkboxes outside the scroll container and clipped them. Lists own their
+   own gutter, and a task item outdents into exactly that gutter. */
+.markdown-view ul, .markdown-view ol { padding-left: 24px; }
+.markdown-view li { margin: 3px 0; }
 /* GFM task lists: a done box should read as done, not as a greyed-out control */
-.markdown-view li.task-item { list-style: none; margin-left: -22px; }
+.markdown-view li.task-item { list-style: none; margin-left: -24px; }
 .markdown-view li.task-item input {
   appearance: none; -webkit-appearance: none;
   width: 14px; height: 14px; margin-right: 9px; vertical-align: -2px;
@@ -445,6 +470,23 @@ footer {
 body.tree-collapsed #tree-pane { display: none; }
 body.tree-collapsed .rail-show { display: flex; }
 body.tree-collapsed #btn-collapse { color: var(--accent); }
+body.tree-collapsed .tree-resize { display: none; }
+
+/* Resize handle: a 5px hit area with a 1px line, so it is easy to grab and
+   quiet when you are not grabbing it. */
+.tree-resize {
+  flex: 0 0 5px; margin-left: -3px; cursor: col-resize; position: relative; z-index: 5;
+  background: transparent; transition: background 0.12s;
+}
+.tree-resize::after {
+  content: ''; position: absolute; inset: 0 2px; background: transparent; transition: background 0.12s;
+}
+.tree-resize:hover::after, .tree-resize.dragging::after, .tree-resize:focus-visible::after {
+  background: var(--accent);
+}
+.tree-resize:focus-visible { outline: none; }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing #content-pane { pointer-events: none; }
 
 /* --- modal (share) -------------------------------------------------------- */
 .modal-back {

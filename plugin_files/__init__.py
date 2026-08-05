@@ -40,7 +40,7 @@ class FilesPlugin(LunaPlugin):
         shown_name="Files",
         icon="folder",
         image="assets/icon.png",
-        version="0.10.0",
+        version="0.11.0",
         description="File storage and browser.",
         category="system",
         # 001: plugin-files is the StorageProvider — the one sanctioned way any

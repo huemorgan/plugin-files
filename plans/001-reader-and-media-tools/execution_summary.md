@@ -41,6 +41,44 @@ deviations are recorded below.
   `demo.md` → `https://md.page/Cnz5EJ` (HTTP 200), expiry rendered as
   "Stops working on 8/6/2026, 1:25:01 PM".
 
+## 0.11.0 follow-up — the toolbar reads as a toolbar
+
+Roy, on 0.10.0: *"make the toolbar more clear — like a different background or
+something and also with nice flat icons"* and *"also have the left pane of the
+files resizable"*.
+
+- **The toolbar is a surface, not a caption.** It was a row of text with a hair
+  line under it, sitting on the same background as the document. Now it is a
+  raised strip — `--bg-panel`, a border, 10px radius, an inset highlight and a
+  soft drop shadow — and the buttons on it get their own darker fill so they
+  read as pressable rather than as labels.
+- **Flat line icons on every action.** One `ICON_PATHS` map in `app.js` with a
+  single 24-grid and one stroke weight, wrapped by `ico(name)`; glyphs inherit
+  `currentColor`, so a hover or an active segment carries its icon with it.
+  Covered: Preview, Edit, Source, Save, Share, Reader, Download, Open, zoom
+  ±, Fit, 1:1, Rotate, Print, Close. The file's own kind glyph now leads the
+  bar in its type colour, and a long name truncates instead of pushing the
+  controls off the edge.
+- **The file list is resizable.** A 5px handle between the tree and the
+  content: drag to resize, double-click or Home to reset to 280px, arrow keys
+  when focused (Shift for a bigger step). Width lives in one CSS variable
+  (`--tree-w`) so a drag is one style write per frame, is clamped to
+  180px…min(720, viewport − 320) so the preview can never be squeezed out of
+  existence, re-clamps when the window narrows, and persists in
+  `localStorage`. Hidden while the list is collapsed.
+
+**A real bug this surfaced:** the global `* { padding: 0 }` reset had stripped
+list padding in the markdown view, so bullets, ordered-list numbers and task
+checkboxes were rendered *outside* the scroll container and clipped — a task
+checkbox showed as a purple sliver, which is what made it look like a styling
+mistake. Lists now own a 24px gutter and a task item outdents into exactly
+that gutter. Verified by measuring the checkbox rect against the container's:
+`left` was 6px outside before, flush after.
+
+Verified in the browser across eight fresh screenshots: markdown, image, HTML
+and edit-mode toolbars; the drag (280 → 460, persisted); the collapsed state
+with the handle hidden and the rail shown; the reader overlay bar.
+
 ## Bugs found and fixed during the browser pass
 
 - The dirty-marker refresh re-rendered the toolbar, destroying the textarea
