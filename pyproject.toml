@@ -1,11 +1,11 @@
 [project]
 name = "plugin-files"
-version = "0.9.0"
+version = "0.10.0"
 description = "File storage + browser UI for Luna. Built on luna_sdk v0."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-dependencies = ["fastapi>=0.110"]
+dependencies = ["fastapi>=0.110", "httpx>=0.26"]
 
 [project.optional-dependencies]
 # The `object` backend (Tigris/R2) needs an S3 client; only installed where used.

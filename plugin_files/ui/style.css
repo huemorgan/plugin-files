@@ -362,3 +362,147 @@ footer {
 .up-name { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .up-bar { height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
 .up-fill { height: 100%; width: 0; background: var(--accent); border-radius: 3px; transition: width .2s; }
+
+/* ============================================================================
+   001 — reader, media tools, collapsible list
+   ========================================================================== */
+
+/* Segmented control — one grammar for every "which view" choice */
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg-btn {
+  padding: 5px 11px; font-size: 12px; background: transparent; color: var(--text-dim);
+  border: none; border-right: 1px solid var(--border); cursor: pointer; font-family: inherit;
+  transition: background 0.12s, color 0.12s;
+}
+.seg-btn:last-child { border-right: none; }
+.seg-btn:hover { background: var(--bg-hover); color: var(--text); }
+.seg-btn.on { background: var(--bg-active); color: var(--text); font-weight: 500; }
+.seg-read {
+  padding: 5px 8px; font-size: 11px; color: var(--text-dim); font-family: monospace;
+  min-width: 48px; text-align: center; border-right: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.btn-icon { padding: 6px 8px; }
+
+/* --- markdown: reading column + editor ----------------------------------- */
+.md-measure { max-width: 76ch; width: 100%; margin: 0 auto; padding: 4px 16px 48px; }
+.pv-dirty {
+  font-size: 11px; color: var(--yellow); background: rgba(245,158,11,0.12);
+  padding: 2px 7px; border-radius: 4px;
+}
+.md-editor {
+  width: 100%; flex: 1; min-height: 0; resize: none;
+  background: var(--bg-panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; outline: none; padding: 14px 16px;
+  font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; line-height: 1.6;
+  tab-size: 2;
+}
+.md-editor:focus { border-color: var(--accent); }
+
+/* Code blocks inside rendered markdown get a copy button */
+.markdown-view pre.has-copy { position: relative; }
+.code-copy {
+  position: absolute; top: 8px; right: 8px; padding: 3px 8px; font-size: 11px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+  color: var(--text-dim); cursor: pointer; opacity: 0; transition: opacity 0.15s; font-family: inherit;
+}
+.markdown-view pre.has-copy:hover .code-copy { opacity: 1; }
+.code-copy:hover { color: var(--text); background: var(--bg-hover); }
+/* GFM task lists: a done box should read as done, not as a greyed-out control */
+.markdown-view li.task-item { list-style: none; margin-left: -22px; }
+.markdown-view li.task-item input {
+  appearance: none; -webkit-appearance: none;
+  width: 14px; height: 14px; margin-right: 9px; vertical-align: -2px;
+  border: 1.5px solid var(--text-muted); border-radius: 4px; background: transparent;
+}
+.markdown-view li.task-item input:checked {
+  background: var(--accent); border-color: var(--accent);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6'/%3E%3C/svg%3E");
+  background-size: 12px 12px; background-position: center; background-repeat: no-repeat;
+}
+.markdown-view li.task-item input:checked + * , .markdown-view li.task-item:has(input:checked) { color: var(--text-dim); }
+.markdown-view h1, .markdown-view h2, .markdown-view h3, .markdown-view h4 { scroll-margin-top: 16px; }
+.markdown-view hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+.markdown-view thead th { background: var(--bg-panel); font-weight: 600; }
+
+/* --- image stage: transform-based zoom ----------------------------------- */
+.image-view { overflow: hidden; cursor: default; position: relative; }
+.image-view img {
+  max-width: none; max-height: none; object-fit: none;
+  transform-origin: center center; will-change: transform;
+  user-select: none; -webkit-user-drag: none;
+}
+.image-view.zoomed { cursor: grab; }
+.image-view.zoomed:active { cursor: grabbing; }
+
+/* --- collapsible file list ----------------------------------------------- */
+.rail-show {
+  display: none; width: 26px; flex-shrink: 0; align-items: center; justify-content: center;
+  background: var(--bg-panel); border: none; border-right: 1px solid var(--border);
+  color: var(--text-dim); cursor: pointer; padding: 0; transition: background 0.12s, color 0.12s;
+}
+.rail-show:hover { background: var(--bg-active); color: var(--text); }
+body.tree-collapsed #tree-pane { display: none; }
+body.tree-collapsed .rail-show { display: flex; }
+body.tree-collapsed #btn-collapse { color: var(--accent); }
+
+/* --- modal (share) -------------------------------------------------------- */
+.modal-back {
+  position: fixed; inset: 0; z-index: 900; background: rgba(6,6,14,0.72);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  backdrop-filter: blur(2px);
+}
+.modal {
+  width: min(460px, 100%); background: var(--bg-panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 14px; padding: 22px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+}
+.modal h3 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+.modal-body { font-size: 13px; line-height: 1.6; color: var(--text-dim); }
+.modal-body strong { color: var(--text); }
+.modal-body a { color: var(--accent); }
+.modal-note { font-size: 12px; color: var(--text-muted); margin-top: 10px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.share-link { display: flex; gap: 8px; margin-top: 4px; }
+.share-link input {
+  flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); font-size: 13px; padding: 8px 10px;
+  font-family: 'SF Mono', monospace; outline: none;
+}
+.share-link input:focus { border-color: var(--accent); }
+
+/* ============================================================================
+   Reader window — its own page, so it owns the whole viewport
+   ========================================================================== */
+.reader-body {
+  height: 100vh; display: flex; flex-direction: column;
+  background: var(--bg); color: var(--text);
+}
+.rd-bar {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg-panel);
+}
+.rd-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.rd-spacer { flex: 1; }
+.rd-zoom { display: inline-flex; gap: 6px; }
+.rd-btn { font-size: 12px; padding: 5px 10px; }
+.rd-main { flex: 1; min-height: 0; overflow: auto; }
+.rd-doc {
+  max-width: 76ch; margin: 0 auto; padding: 40px 28px 96px;
+  line-height: 1.75; overflow: visible;
+}
+.rd-error { color: var(--red); font-size: 13px; }
+
+@media print {
+  .rd-bar { display: none; }
+  .reader-body { height: auto; background: white; color: black; }
+  .rd-doc { max-width: none; padding: 0; color: black; }
+  .code-copy { display: none; }
+}
+
+/* Fallback reader when the browser blocks the popup — fills the pane */
+.reader-overlay {
+  position: fixed; inset: 0; z-index: 800; background: var(--bg);
+  display: flex; flex-direction: column;
+}
+.reader-overlay .rd-main { flex: 1; min-height: 0; overflow: auto; }

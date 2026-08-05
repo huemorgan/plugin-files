@@ -30,6 +30,8 @@ const expandedDirs = new Set(['/']);
 const loadingDirs = new Set();    // dirs with an in-flight /list (caret spinner)
 let visibleRows = [];             // flat, in render order — for keyboard nav
 let _objectUrl = null;            // last created blob: URL (revoked on nav)
+let imageKeyHandler = null;       // set by the image previewer, cleared on nav
+const readerWindows = new Map();  // path -> the reader window we opened for it
 
 function listKey(path) { return path && path !== '/' ? path : '/'; }
 
@@ -347,6 +349,7 @@ async function showFile(entry) {
   placeholder.classList.add('hidden');
   viewer.classList.remove('hidden');
   viewer.innerHTML = skeleton();
+  imageKeyHandler = null;         // previous previewer's shortcuts die with it
 
   const kind = detectKind(entry);
   setStatus(`${entry.path} · ${formatSize(entry.size_bytes)} · ${entry.mime_type || 'unknown type'}`);
@@ -361,18 +364,107 @@ async function showFile(entry) {
 }
 
 const PREVIEWERS = {
+  // Zoomable canvas: wheel to zoom at the cursor, drag to pan, keys for the
+  // usual four moves. Zoom is one CSS transform — no library, no re-decode.
   image: async (entry, viewer) => {
-    viewer.innerHTML = toolbar(entry, `<span class="pv-dim" id="pv-dim"></span>`) +
-      `<div class="image-view" id="image-view" title="Click to toggle actual size"><img id="preview-img" alt="${escapeHtml(entry.name)}"></div>`;
+    viewer.innerHTML = toolbar(entry, `
+      <span class="pv-dim" id="pv-dim"></span>
+      <div class="seg" role="group" aria-label="Zoom">
+        <button class="seg-btn" id="zoom-out" title="Zoom out (−)">−</button>
+        <span class="seg-read" id="zoom-read">100%</span>
+        <button class="seg-btn" id="zoom-in" title="Zoom in (+)">+</button>
+      </div>
+      <button class="btn" id="zoom-fit" title="Fit to window (0)">Fit</button>
+      <button class="btn" id="zoom-one" title="Actual size (1)">1:1</button>
+      <button class="btn" id="img-rotate" title="Rotate 90°">Rotate</button>
+      <button class="btn" id="img-open" title="Open in a new tab">Open</button>`) +
+      `<div class="image-view" id="image-view"><img id="preview-img" alt="${escapeHtml(entry.name)}" draggable="false"></div>`;
     wireDownload(viewer, entry);
+
+    const stage = viewer.querySelector('#image-view');
     const img = viewer.querySelector('#preview-img');
+    const readout = viewer.querySelector('#zoom-read');
+    let scale = 1, fitScale = 1, rotation = 0, panX = 0, panY = 0, fitting = true;
+
+    const apply = () => {
+      img.style.transform =
+        `translate(${panX}px, ${panY}px) scale(${scale}) rotate(${rotation}deg)`;
+      readout.textContent = `${Math.round(scale / fitScale * 100)}%`;
+      stage.classList.toggle('zoomed', scale > fitScale * 1.001);
+    };
+    const computeFit = () => {
+      if (!img.naturalWidth) return;
+      const box = stage.getBoundingClientRect();
+      const swapped = rotation % 180 !== 0;
+      const w = swapped ? img.naturalHeight : img.naturalWidth;
+      const h = swapped ? img.naturalWidth : img.naturalHeight;
+      fitScale = Math.min(box.width / w, box.height / h, 1) || 1;
+    };
+    const fit = () => { computeFit(); scale = fitScale; panX = panY = 0; fitting = true; apply(); };
+    const oneToOne = () => { computeFit(); scale = 1; panX = panY = 0; fitting = false; apply(); };
+    const zoomBy = (factor, ox, oy) => {
+      const next = Math.max(fitScale * 0.25, Math.min(16, scale * factor));
+      if (ox != null) {                       // keep the cursor point anchored
+        const k = next / scale - 1;
+        panX -= (ox - panX) * k;
+        panY -= (oy - panY) * k;
+      }
+      scale = next;
+      fitting = false;
+      apply();
+    };
+
     img.addEventListener('load', () => {
       const d = viewer.querySelector('#pv-dim');
       if (d && img.naturalWidth) d.textContent = `${img.naturalWidth}×${img.naturalHeight}`;
+      fit();
     });
-    img.addEventListener('error', () => { viewer.querySelector('#image-view').innerHTML = '<div class="pv-error">Failed to load image</div>'; });
+    img.addEventListener('error', () => { stage.innerHTML = '<div class="pv-error">Failed to load image</div>'; });
     img.src = readUrl(entry.path);
-    viewer.querySelector('#image-view').addEventListener('click', (e) => e.currentTarget.classList.toggle('actual-size'));
+
+    viewer.querySelector('#zoom-in').addEventListener('click', () => zoomBy(1.25));
+    viewer.querySelector('#zoom-out').addEventListener('click', () => zoomBy(1 / 1.25));
+    viewer.querySelector('#zoom-fit').addEventListener('click', fit);
+    viewer.querySelector('#zoom-one').addEventListener('click', oneToOne);
+    viewer.querySelector('#img-rotate').addEventListener('click', () => {
+      rotation = (rotation + 90) % 360;
+      fit();
+    });
+    viewer.querySelector('#img-open').addEventListener('click', () => window.open(readUrl(entry.path), '_blank', 'noopener'));
+
+    stage.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const box = stage.getBoundingClientRect();
+      zoomBy(e.deltaY < 0 ? 1.12 : 1 / 1.12,
+             e.clientX - box.left - box.width / 2,
+             e.clientY - box.top - box.height / 2);
+    }, { passive: false });
+
+    stage.addEventListener('dblclick', () => (scale > fitScale * 1.001 ? fit() : oneToOne()));
+
+    let dragging = false, sx = 0, sy = 0;
+    stage.addEventListener('pointerdown', (e) => {
+      if (scale <= fitScale * 1.001) return;
+      dragging = true; sx = e.clientX - panX; sy = e.clientY - panY;
+      stage.setPointerCapture(e.pointerId);
+    });
+    stage.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      panX = e.clientX - sx; panY = e.clientY - sy; apply();
+    });
+    stage.addEventListener('pointerup', () => { dragging = false; });
+
+    imageKeyHandler = (e) => {
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomBy(1.25); }
+      else if (e.key === '-') { e.preventDefault(); zoomBy(1 / 1.25); }
+      else if (e.key === '0') { e.preventDefault(); fit(); }
+      else if (e.key === '1') { e.preventDefault(); oneToOne(); }
+    };
+    // Re-fit when the pane resizes (e.g. the file list is collapsed).
+    if (window.ResizeObserver) {
+      const ro = new ResizeObserver(() => { if (fitting) fit(); });
+      ro.observe(stage);
+    }
   },
 
   svg: async (entry, viewer) => {
@@ -415,11 +507,16 @@ const PREVIEWERS = {
   },
 
   html: async (entry, viewer) => {
-    let showingSource = false;
+    let mode = 'preview';                 // 'preview' | 'source'
     const text = await authedText(entry.path);
     const render = () => {
-      viewer.innerHTML = toolbar(entry, `<button class="btn pv-toggle">${showingSource ? 'Preview' : 'Source'}</button>`);
-      if (showingSource) {
+      viewer.innerHTML = toolbar(entry, `
+        <div class="seg" role="group" aria-label="View mode">
+          <button class="seg-btn ${mode === 'preview' ? 'on' : ''}" data-mode="preview">Preview</button>
+          <button class="seg-btn ${mode === 'source' ? 'on' : ''}" data-mode="source">Source</button>
+        </div>
+        <button class="btn pv-open" title="Open in a new tab">Open</button>`);
+      if (mode === 'source') {
         const body = document.createElement('div');
         body.className = 'code-view';
         body.innerHTML = `<pre><code class="language-html">${escapeHtml(text)}</code></pre>`;
@@ -434,32 +531,85 @@ const PREVIEWERS = {
         viewer.appendChild(frame);
       }
       wireDownload(viewer, entry);
-      viewer.querySelector('.pv-toggle').addEventListener('click', () => { showingSource = !showingSource; render(); });
+      viewer.querySelectorAll('.seg-btn').forEach((b) => {
+        b.addEventListener('click', () => { mode = b.dataset.mode; render(); });
+      });
+      viewer.querySelector('.pv-open').addEventListener('click', () => window.open(readUrl(entry.path), '_blank', 'noopener'));
     };
     render();
   },
 
+  // Markdown gets the full treatment: a typeset reading column, an editor
+  // behind the same segmented control (an editor IS the source view), a Share
+  // that publishes to a public link, and a Reader that escapes the iframe.
   markdown: async (entry, viewer) => {
-    let showingSource = false;
-    const text = await authedText(entry.path);
+    let mode = 'preview';                 // 'preview' | 'edit'
+    let text = await authedText(entry.path);
+    let draft = text;                     // survives Preview/Edit switching
+
     const render = () => {
-      viewer.innerHTML = toolbar(entry, `<button class="btn pv-toggle">${showingSource ? 'Rendered' : 'Source'}</button>`);
-      const body = document.createElement('div');
-      if (showingSource) {
-        body.className = 'code-view';
-        body.innerHTML = `<pre><code class="language-markdown">${escapeHtml(text)}</code></pre>`;
-        viewer.appendChild(body);
-        if (window.hljs) body.querySelectorAll('code').forEach((c) => hljs.highlightElement(c));
+      const actions = `
+        <div class="seg" role="group" aria-label="View mode">
+          <button class="seg-btn ${mode === 'preview' ? 'on' : ''}" data-mode="preview">Preview</button>
+          <button class="seg-btn ${mode === 'edit' ? 'on' : ''}" data-mode="edit">Edit</button>
+        </div>
+        <span class="pv-dirty ${draft === text ? 'hidden' : ''}" title="Unsaved changes">Unsaved</span>
+        ${mode === 'edit' ? '<button class="btn btn-primary pv-save">Save</button>' : ''}
+        <button class="btn pv-share" title="Publish a public link to this document">Share</button>
+        <button class="btn pv-reader" title="Open in a full reading window">Reader</button>`;
+      viewer.innerHTML = toolbar(entry, actions);
+
+      if (mode === 'edit') {
+        const ta = document.createElement('textarea');
+        ta.id = 'editor';
+        ta.className = 'md-editor';
+        ta.value = draft;
+        ta.spellcheck = false;
+        viewer.appendChild(ta);
+        // Toggle the badge in place — re-rendering here would destroy the
+        // textarea under the cursor on the very first keystroke.
+        ta.addEventListener('input', () => {
+          draft = ta.value;
+          viewer.querySelector('.pv-dirty').classList.toggle('hidden', draft === text);
+        });
+        ta.addEventListener('keydown', (e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); save(); }
+        });
+        viewer.querySelector('.pv-save').addEventListener('click', save);
+        ta.focus();
       } else {
-        body.className = 'markdown-view';
-        const raw = window.marked ? marked.parse(text) : escapeHtml(text);
-        body.innerHTML = window.DOMPurify ? DOMPurify.sanitize(raw) : raw;
+        const body = document.createElement('div');
+        body.className = 'markdown-view md-measure';
         viewer.appendChild(body);
-        if (window.hljs) body.querySelectorAll('pre code').forEach((c) => hljs.highlightElement(c));
+        window.LunaMd.renderMarkdown(draft, body, {
+          dir: parentDir(entry.path) === '/' ? '' : parentDir(entry.path),
+          readUrl,
+          onInternalLink: openByPath,
+        });
       }
+
       wireDownload(viewer, entry);
-      viewer.querySelector('.pv-toggle').addEventListener('click', () => { showingSource = !showingSource; render(); });
+      viewer.querySelectorAll('.seg-btn').forEach((b) => {
+        b.addEventListener('click', () => { mode = b.dataset.mode; render(); });
+      });
+      viewer.querySelector('.pv-share').addEventListener('click', () => shareDialog(entry));
+      viewer.querySelector('.pv-reader').addEventListener('click', () => openReader(entry.path));
     };
+
+    const save = async () => {
+      const content = viewer.querySelector('#editor').value;
+      const form = new FormData();
+      form.append('content', new Blob([content], { type: 'text/markdown' }));
+      try {
+        await api('POST', `/write/${encodeURIComponent(entry.path)}`, form);
+        text = content;
+        draft = content;
+        invalidateParent(entry.path);
+        toast('Saved', 'success');
+        render();
+      } catch { toast('Save failed', 'error'); }
+    };
+
     render();
   },
 
@@ -602,6 +752,163 @@ function downloadFile(entry) {
   a.remove();
 }
 
+// ---- reader window ---------------------------------------------------------
+// The shell embeds this pane in an iframe without allowfullscreen, so a modal
+// here can never be taller than the iframe. A real window can — and it is the
+// same origin, so it shares localStorage and we can hand it the live token.
+function openReader(path) {
+  const existing = readerWindows.get(path);
+  if (existing && !existing.closed) { existing.focus(); return; }
+  const url = `${API}/ui/reader.html?path=${encodeURIComponent(path)}`;
+  const w = window.open(url, `luna-reader-${path}`, 'width=980,height=1000,menubar=no,toolbar=no');
+  if (!w) {
+    // Popup blocked. Fall back to an overlay: smaller than a real window, but a
+    // blocked click must never be a dead end.
+    toast('Popup blocked — opening here instead', 'info');
+    readerOverlay(path);
+    return;
+  }
+  readerWindows.set(path, w);
+  // localStorage is the usual path; this covers the case where the shell handed
+  // us a token that never got written there.
+  try { w.postMessage({ type: 'luna-auth', token: TOKEN }, location.origin); } catch { /* not ready */ }
+}
+
+// Fallback reader: the same document, the same typography, filling this pane.
+async function readerOverlay(path) {
+  const back = document.createElement('div');
+  back.className = 'reader-overlay';
+  back.innerHTML = `
+    <header class="rd-bar">
+      <span class="rd-title">${escapeHtml(path.split('/').pop())}</span>
+      <span class="rd-spacer"></span>
+      <button class="btn rd-btn ov-print" title="Print or save as PDF">Print</button>
+      <button class="btn rd-btn ov-close" title="Close (Esc)">Close</button>
+    </header>
+    <main class="rd-main"><article class="markdown-view rd-doc"></article></main>`;
+  document.body.appendChild(back);
+
+  const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  back.querySelector('.ov-close').addEventListener('click', close);
+  back.querySelector('.ov-print').addEventListener('click', () => window.print());
+
+  const doc = back.querySelector('.rd-doc');
+  try {
+    const text = await authedText(path);
+    window.LunaMd.renderMarkdown(text, doc, {
+      dir: parentDir(path) === '/' ? '' : parentDir(path),
+      readUrl,
+      onInternalLink: (p) => { close(); openByPath(p); },
+    });
+  } catch (err) {
+    doc.innerHTML = `<p class="rd-error">Could not open this document.</p>`;
+  }
+}
+
+// A reader announces itself once its scripts run — answer with the token.
+window.addEventListener('message', (e) => {
+  if (e.origin !== location.origin) return;
+  if (e.data && e.data.type === 'luna-reader-ready' && e.source) {
+    try { e.source.postMessage({ type: 'luna-auth', token: TOKEN }, location.origin); } catch { /* gone */ }
+  }
+});
+
+// ---- share -----------------------------------------------------------------
+// Publishing is not the same as previewing: it puts the document on the public
+// internet at an unlisted URL. So it asks first, and it says out loud that the
+// link dies in 24 hours rather than letting the owner assume permanence.
+function shareDialog(entry) {
+  const back = document.createElement('div');
+  back.className = 'modal-back';
+  back.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="share-title">
+      <h3 id="share-title">Share this document</h3>
+      <p class="modal-body">
+        <strong>${escapeHtml(entry.name)}</strong> will be published to
+        <a href="https://md.page" target="_blank" rel="noopener noreferrer">md.page</a>
+        at an unlisted public link. Anyone with the link can read it.
+      </p>
+      <p class="modal-note">The link stops working after 24 hours.</p>
+      <div class="modal-actions">
+        <button class="btn share-cancel">Cancel</button>
+        <button class="btn btn-primary share-go">Publish link</button>
+      </div>
+    </div>`;
+  document.body.appendChild(back);
+
+  const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  back.querySelector('.share-cancel').addEventListener('click', close);
+
+  back.querySelector('.share-go').addEventListener('click', async () => {
+    const go = back.querySelector('.share-go');
+    go.disabled = true;
+    go.textContent = 'Publishing…';
+    try {
+      const res = await api('POST', '/share', { path: entry.path });
+      const data = await res.json();
+      showShareResult(back, data);
+    } catch (err) {
+      go.disabled = false;
+      go.textContent = 'Publish link';
+      toast('Could not publish this document', 'error');
+    }
+  });
+}
+
+function showShareResult(back, data) {
+  const expires = data.expires_at ? new Date(data.expires_at) : null;
+  const when = expires && !isNaN(expires) ? expires.toLocaleString() : 'in 24 hours';
+  back.querySelector('.modal').innerHTML = `
+    <h3>Your link is live</h3>
+    <div class="share-link">
+      <input type="text" id="share-url" readonly value="${escapeHtml(data.url || '')}">
+      <button class="btn btn-primary share-copy">Copy</button>
+    </div>
+    <p class="modal-note">Stops working ${escapeHtml(when === 'in 24 hours' ? when : `on ${when}`)}.</p>
+    <div class="modal-actions">
+      <button class="btn share-open">Open</button>
+      <button class="btn share-done">Done</button>
+    </div>`;
+  const input = back.querySelector('#share-url');
+  input.select();
+  back.querySelector('.share-copy').addEventListener('click', async () => {
+    const b = back.querySelector('.share-copy');
+    try { await navigator.clipboard.writeText(data.url); b.textContent = 'Copied'; }
+    catch { input.select(); document.execCommand('copy'); b.textContent = 'Copied'; }
+    setTimeout(() => { b.textContent = 'Copy'; }, 1500);
+  });
+  back.querySelector('.share-open').addEventListener('click', () => window.open(data.url, '_blank', 'noopener'));
+  back.querySelector('.share-done').addEventListener('click', () => back.remove());
+}
+
+// ---- follow a link inside a document ---------------------------------------
+// A markdown link to a sibling file should open that file here, the way it
+// would in an editor — not download it or dead-end in a new tab.
+async function openByPath(path) {
+  const clean = String(path).replace(/^\/+/, '');
+  try {
+    const res = await api('GET', `/stat/${encodeURIComponent(clean)}`);
+    const entry = await res.json();
+    if (entry.is_dir) {
+      expandedDirs.add(entry.path);
+      currentPath = entry.path;
+      await ensureDir(entry.path);
+      renderTree();
+      return;
+    }
+    selectedFile = entry.path;
+    renderTree();
+    showFile(entry);
+  } catch {
+    toast(`No such file: ${clean}`, 'error');
+  }
+}
+
 // ---- cache invalidation ----------------------------------------------------
 function parentDir(path) {
   const i = path.lastIndexOf('/');
@@ -739,6 +1046,25 @@ document.getElementById('filter').addEventListener('input', (e) => {
   renderTree();
 });
 
+// ---- collapse the file list ------------------------------------------------
+// A document deserves the whole pane. Collapsed leaves a slim rail so the list
+// is one click away and never disappears entirely.
+let treeCollapsed = localStorage.getItem('luna.files.treeCollapsed') === '1';
+
+function setTreeCollapsed(next) {
+  treeCollapsed = next;
+  document.body.classList.toggle('tree-collapsed', treeCollapsed);
+  localStorage.setItem('luna.files.treeCollapsed', treeCollapsed ? '1' : '0');
+  const btn = document.getElementById('btn-collapse');
+  if (btn) {
+    btn.setAttribute('aria-expanded', String(!treeCollapsed));
+    btn.title = treeCollapsed ? 'Show the file list (⌘B)' : 'Hide the file list (⌘B)';
+  }
+}
+document.getElementById('btn-collapse').addEventListener('click', () => setTreeCollapsed(!treeCollapsed));
+document.getElementById('rail-show').addEventListener('click', () => setTreeCollapsed(false));
+setTreeCollapsed(treeCollapsed);
+
 // ---- list / grid toggle ----------------------------------------------------
 document.getElementById('btn-view').addEventListener('click', () => {
   viewMode = viewMode === 'list' ? 'grid' : 'list';
@@ -748,6 +1074,12 @@ document.getElementById('btn-view').addEventListener('click', () => {
 // ---- keyboard navigation ---------------------------------------------------
 document.addEventListener('keydown', (e) => {
   if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
+    e.preventDefault();
+    setTreeCollapsed(!treeCollapsed);
+    return;
+  }
+  if (imageKeyHandler && ['+', '=', '-', '0', '1'].includes(e.key)) { imageKeyHandler(e); return; }
   if (!visibleRows.length) return;
   let idx = visibleRows.findIndex((r) => r.path === selectedFile);
   if (e.key === 'ArrowDown') {

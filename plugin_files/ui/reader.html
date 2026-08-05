@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reader — Luna Files</title>
+  <link rel="stylesheet" href="vendor/highlight-theme.min.css">
+  <link rel="stylesheet" href="style.css?v=0.10.0">
+</head>
+<body class="reader-body">
+  <header class="rd-bar">
+    <span class="rd-title" id="rd-title">Loading…</span>
+    <span class="rd-spacer"></span>
+    <div class="rd-zoom" role="group" aria-label="Text size">
+      <button class="btn rd-btn" id="rd-smaller" title="Smaller text">A−</button>
+      <button class="btn rd-btn" id="rd-bigger" title="Larger text">A+</button>
+    </div>
+    <button class="btn rd-btn" id="rd-print" title="Print or save as PDF">Print</button>
+    <button class="btn rd-btn" id="rd-close" title="Close this window">Close</button>
+  </header>
+  <main class="rd-main">
+    <article class="markdown-view rd-doc" id="rd-doc"></article>
+  </main>
+  <script src="vendor/marked.min.js"></script>
+  <script src="vendor/purify.min.js"></script>
+  <script src="vendor/highlight.min.js"></script>
+  <script src="md.js?v=0.10.0"></script>
+  <script src="reader.js?v=0.10.0"></script>
+</body>
+</html>

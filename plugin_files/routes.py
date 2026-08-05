@@ -5,12 +5,17 @@ from __future__ import annotations
 import mimetypes
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from luna_sdk import get_current_user
 
 from .backends import make_storage_from_env
+
+# Public markdown hosting for the Share button. Anonymous pages live 24 hours.
+MD_PAGE_API = "https://md.page/api/publish"
+SHARE_MAX_BYTES = 1024 * 1024
 
 
 def _etag(entry) -> str:
@@ -211,6 +216,46 @@ def register_routes(app, ctx):
             "created_at": entry.created_at.isoformat(),
             "modified_at": entry.modified_at.isoformat(),
         }
+
+    @router.post("/share")
+    async def share_markdown(body: dict, user=Depends(get_current_user)):
+        """Publish a text document to md.page and return its public link.
+
+        Sharing is *publishing* — the caller (the UI) confirms with the owner
+        first. Anonymous md.page pages expire after 24 hours; we pass the
+        service's own `expires_at` back untouched so the UI can say so rather
+        than imply permanence.
+        """
+        storage = _storage()
+        if storage is None:
+            raise HTTPException(503, "plugin-files not loaded")
+        path = (body or {}).get("path", "")
+        if not path:
+            raise HTTPException(400, "path required")
+        try:
+            entry = await storage.stat(path)
+        except FileNotFoundError:
+            raise HTTPException(404, "File not found")
+        if entry.is_dir:
+            raise HTTPException(400, "Cannot share a directory")
+        if (entry.size_bytes or 0) > SHARE_MAX_BYTES:
+            raise HTTPException(413, "File is too large to share (limit 1 MB)")
+
+        raw = await storage.read(path)
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(400, "Only text documents can be shared")
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                res = await client.post(MD_PAGE_API, json={"markdown": text})
+            except httpx.HTTPError as e:
+                raise HTTPException(502, f"Could not reach md.page: {e}")
+        if res.status_code >= 400:
+            raise HTTPException(502, f"md.page refused the document ({res.status_code})")
+        data = res.json()
+        return {"url": data.get("url"), "expires_at": data.get("expires_at")}
 
     @router.get("/usage")
     async def storage_usage(user=Depends(get_current_user)):
