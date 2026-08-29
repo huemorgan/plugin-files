@@ -30,6 +30,7 @@ def _install_luna_sdk_stub() -> None:
         timeout_seconds: int | None = None
         sensitive_args: list = field(default_factory=list)
         skill_gated: bool = False
+        modes: list | None = None
 
     @dataclass
     class SidebarSection:

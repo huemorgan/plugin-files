@@ -40,7 +40,7 @@ class FilesPlugin(LunaPlugin):
         shown_name="Files",
         icon="folder",
         image="assets/icon.png",
-        version="0.11.0",
+        version="0.12.0",
         description="File storage and browser.",
         category="system",
         # 001: plugin-files is the StorageProvider — the one sanctioned way any
@@ -236,6 +236,7 @@ class FilesPlugin(LunaPlugin):
             name="file_list", description="List files and folders in a directory.",
             parameters={"type": "object", "properties": {"path": {"type": "string", "description": "Directory path (default: /)"}}, "required": []},
             policy="auto_approve", risk_level="low",
+            modes=["planning", "building", "identify", "fix_approve", "fix_publish"],
         ), _file_list)
 
         _register(ToolDef(
@@ -253,30 +254,35 @@ class FilesPlugin(LunaPlugin):
                 "search": {"type": "string", "description": "Return only lines containing this substring, with line numbers."},
             }, "required": ["path"]},
             policy="auto_approve", risk_level="low",
+            modes=["planning", "building", "identify", "fix_approve", "fix_publish"],
         ), _file_read)
 
         _register(ToolDef(
             name="file_write", description="Write text content to a file. Creates parent directories if needed.",
             parameters={"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]},
             policy="prompt_always", risk_level="low",
+            modes=["planning", "building", "fix_approve", "fix_publish"],
         ), _file_write)
 
         _register(ToolDef(
             name="file_mkdir", description="Create a directory (and any parent directories).",
             parameters={"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
             policy="auto_approve", risk_level="low",
+            modes=["planning", "building", "fix_approve", "fix_publish"],
         ), _file_mkdir)
 
         _register(ToolDef(
             name="file_delete", description="Delete a file or directory. Requires owner approval.",
             parameters={"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
             policy="prompt_always", risk_level="high",
+            modes=["planning", "building", "fix_approve", "fix_publish"],
         ), _file_delete)
 
         _register(ToolDef(
             name="file_move", description="Move or rename a file or directory.",
             parameters={"type": "object", "properties": {"src": {"type": "string"}, "dst": {"type": "string"}}, "required": ["src", "dst"]},
             policy="prompt_always", risk_level="low",
+            modes=["planning", "building", "fix_approve", "fix_publish"],
         ), _file_move)
 
         _register(ToolDef(
@@ -284,6 +290,7 @@ class FilesPlugin(LunaPlugin):
             description="Report the file store's backend, durability, location and usage.",
             parameters={"type": "object", "properties": {}, "required": []},
             policy="auto_approve", risk_level="low",
+            modes=["planning", "building", "identify", "fix_approve", "fix_publish"],
         ), _file_storage_status)
 
         if gate:
