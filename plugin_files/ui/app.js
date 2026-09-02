@@ -47,6 +47,22 @@ window.addEventListener('message', (e) => {
     init();
   }
 });
+
+// 013: shell navigate bridge. The shell buffers navigate targets (from
+// luna-navigate messages or the agent's navigate_to tool) until this iframe
+// posts luna-ui-ready, then forwards them as luna-plugin-event. A target can
+// arrive before auth/init, so it parks in pendingNavigate until init() ran.
+let pendingNavigate = null;
+let treeReady = false;
+window.addEventListener('message', (e) => {
+  if (e.origin !== location.origin) return;
+  const d = e.data;
+  if (!d || d.type !== 'luna-plugin-event' || d.event !== 'navigate') return;
+  const target = d.payload && typeof d.payload.target === 'string' ? d.payload.target : '';
+  if (!target) return;
+  if (treeReady) revealPath(target); else pendingNavigate = target;
+});
+try { window.parent?.postMessage({ type: 'luna-ui-ready' }, '*'); } catch { /* standalone */ }
 setTimeout(() => {
   if (!TOKEN) {
     TOKEN = localStorage.getItem('luna.token') || '';
@@ -944,6 +960,27 @@ async function openByPath(path) {
   }
 }
 
+// 013: a navigate target from the shell ("/findings/report.md") reveals the
+// file where it lives: every ancestor folder is expanded and listed before
+// openByPath selects and previews it (or lands in the folder for a dir).
+async function revealPath(path) {
+  const clean = String(path).replace(/^\/+/, '').replace(/\/+$/, '');
+  if (!clean) return;
+  // The target was often just created by the agent, so cached ancestor
+  // listings are stale — refetch each one on the way down.
+  cache.delete(listKey('/'));
+  try { await ensureDir('/'); } catch { /* openByPath toasts the miss */ }
+  const parts = clean.split('/');
+  let acc = '';
+  for (const part of parts.slice(0, -1)) {
+    acc = acc ? `${acc}/${part}` : part;
+    expandedDirs.add(acc);
+    cache.delete(listKey(acc));
+    try { await ensureDir(acc); } catch { /* openByPath toasts the miss */ }
+  }
+  await openByPath(clean);
+}
+
 // ---- cache invalidation ----------------------------------------------------
 function parentDir(path) {
   const i = path.lastIndexOf('/');
@@ -1257,4 +1294,10 @@ async function init() {
   renderTree();
   loadUsage();
   loadStorageStatus();
+  treeReady = true;
+  if (pendingNavigate) {
+    const target = pendingNavigate;
+    pendingNavigate = null;
+    revealPath(target);
+  }
 }
