@@ -40,7 +40,7 @@ class FilesPlugin(LunaPlugin):
         shown_name="Files",
         icon="folder",
         image="assets/icon.png",
-        version="0.13.0",
+        version="0.14.0",
         description="File storage and browser.",
         category="system",
         # 001: plugin-files is the StorageProvider — the one sanctioned way any
@@ -215,14 +215,20 @@ class FilesPlugin(LunaPlugin):
                 pass
             return s
 
-        # 0.8.0: all 7 tools ride behind the file-storage skill — file work is
+        # 0.8.0: the tools ride behind the file-storage skill — file work is
         # occasional, and 7 schemas in every turn's prompt is pure flooding.
         # Cores without a skill registry get the tools ungated.
+        # 0.14.0 (plans/002-fix18fails P1.7): the READS are always on. The
+        # skill unlocks tools on the NEXT turn, so a turn asked "what is in my
+        # files?" could never read the store in the turn that was asked — the
+        # model answered from memory of earlier turns instead (dojoP rigor.*
+        # and claims.* failures). file_list / file_read / file_storage_status
+        # register ungated; the writes stay behind the skill.
         gate = getattr(ctx, "skill_registry", None) is not None and SkillDef is not None
 
-        def _register(defn: ToolDef, handler: Any) -> None:
+        def _register(defn: ToolDef, handler: Any, *, gated: bool = True) -> None:
             nonlocal gate
-            if gate:
+            if gate and gated:
                 try:
                     ctx.tool_registry.register(
                         self.manifest.name, defn, handler, skill_gated=True
@@ -233,11 +239,11 @@ class FilesPlugin(LunaPlugin):
             ctx.tool_registry.register(self.manifest.name, defn, handler)
 
         _register(ToolDef(
-            name="file_list", description="List files and folders in a directory.",
+            name="file_list", description="List files and folders in a directory of the owner's file store (always available; no skill needed).",
             parameters={"type": "object", "properties": {"path": {"type": "string", "description": "Directory path (default: /)"}}, "required": []},
             policy="auto_approve", risk_level="low",
             modes=["planning", "building", "identify", "fix_approve", "fix_publish"],
-        ), _file_list)
+        ), _file_list, gated=False)
 
         _register(ToolDef(
             name="file_read",
@@ -255,7 +261,7 @@ class FilesPlugin(LunaPlugin):
             }, "required": ["path"]},
             policy="auto_approve", risk_level="low",
             modes=["planning", "building", "identify", "fix_approve", "fix_publish"],
-        ), _file_read)
+        ), _file_read, gated=False)
 
         _register(ToolDef(
             name="file_write", description="Write text content to a file. Creates parent directories if needed.",
@@ -291,7 +297,7 @@ class FilesPlugin(LunaPlugin):
             parameters={"type": "object", "properties": {}, "required": []},
             policy="auto_approve", risk_level="low",
             modes=["planning", "building", "identify", "fix_approve", "fix_publish"],
-        ), _file_storage_status)
+        ), _file_storage_status, gated=False)
 
         if gate:
             try:
@@ -303,17 +309,20 @@ class FilesPlugin(LunaPlugin):
                 SkillDef(
                     name="file-storage",
                     description=(
-                        "Browse, read, write, move, and delete files in the "
-                        "owner's file store. Load when the owner mentions "
-                        "their files or you need to save/read a document; the "
-                        "file_* tools unlock on your next turn."
+                        "Write, create folders, move, and delete files in the "
+                        "owner's file store. Reading is always available "
+                        "(file_list, file_read, file_storage_status need no "
+                        "skill) — load this before you need to write, move "
+                        "or delete; those tools unlock after loading."
                     ),
                     body=(
                         "# File storage\n\n"
-                        "Tools (unlock on your NEXT turn after loading this "
-                        "skill): file_list, file_read, file_write, "
-                        "file_mkdir, file_delete, file_move, "
-                        "file_storage_status.\n\n"
+                        "Always available, no skill needed: file_list, "
+                        "file_read, file_storage_status — check the store "
+                        "with them in the same turn the owner asks about "
+                        "their files.\n"
+                        "Unlocked by this skill: file_write, file_mkdir, "
+                        "file_delete, file_move.\n\n"
                         "- Paths are absolute from the store root, e.g. "
                         "`/reports/q3.md`; file_write creates parent folders.\n"
                         "- file_read previews large files (head+tail) and takes "
@@ -325,8 +334,7 @@ class FilesPlugin(LunaPlugin):
                         "here?' (backend, durability, usage)."
                     ),
                     tools=[
-                        "file_list", "file_read", "file_write", "file_mkdir",
-                        "file_delete", "file_move", "file_storage_status",
+                        "file_write", "file_mkdir", "file_delete", "file_move",
                     ],
                 ),
             )

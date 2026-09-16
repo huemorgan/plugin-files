@@ -1,6 +1,6 @@
 name = "plugin-files"
 shown_name = "Files"
-version = "0.13.0"
+version = "0.14.0"
 description = "File storage + a standalone file-browser UI, with agent file tools."
 entry = "plugin_files"
 sdk_version = "0"
@@ -41,13 +41,13 @@ tools = 7
 
 [[tools]]
 name = "file_list"
-description = "List files and folders in a directory."
+description = "List files and folders in a directory of the owner's file store (always available; no skill needed)."
 policy = "auto_approve"
 risk_level = "low"
 
 [[tools]]
 name = "file_read"
-description = "Read a text file's content."
+description = "Read a text file (always available; head+tail preview for large files, offset+limit or search for a slice)."
 policy = "auto_approve"
 risk_level = "low"
 
