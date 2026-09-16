@@ -12,7 +12,7 @@ import asyncio
 
 from plugin_files import FilesPlugin
 
-READS = {"file_list", "file_read", "file_storage_status"}
+READS = {"file_list", "file_search", "file_read", "file_storage_status"}
 WRITES = {"file_write", "file_mkdir", "file_delete", "file_move"}
 
 

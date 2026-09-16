@@ -20,6 +20,12 @@ _READ_LINE_LIMIT = int(os.environ.get("LUNA_FILE_READ_LINE_LIMIT", "2000"))
 _SEARCH_MAX_MATCHES = int(os.environ.get("LUNA_FILE_READ_SEARCH_MAX", "100"))
 # Hard ceiling: never pull a multi-MB blob into memory just to slice it.
 _READ_BYTE_CEILING = int(os.environ.get("LUNA_FILE_READ_BYTE_CEILING", "5000000"))
+# plans/002-fix18fails P3.1: file_search caps — results returned, files whose
+# content is scanned, lines quoted per file, bytes a content-scanned file may have.
+_SEARCH_MAX_RESULTS = int(os.environ.get("LUNA_FILE_SEARCH_MAX_RESULTS", "50"))
+_SEARCH_MAX_SCAN = int(os.environ.get("LUNA_FILE_SEARCH_MAX_SCAN", "500"))
+_SEARCH_LINES_PER_FILE = int(os.environ.get("LUNA_FILE_SEARCH_LINES_PER_FILE", "3"))
+_SEARCH_CONTENT_BYTE_CAP = int(os.environ.get("LUNA_FILE_SEARCH_CONTENT_BYTE_CAP", "1000000"))
 
 from luna_sdk import LunaPlugin, PluginContext, PluginManifest, SidebarSection, ToolDef
 
@@ -40,7 +46,7 @@ class FilesPlugin(LunaPlugin):
         shown_name="Files",
         icon="folder",
         image="assets/icon.png",
-        version="0.14.0",
+        version="0.15.0",
         description="File storage and browser.",
         category="system",
         # 001: plugin-files is the StorageProvider — the one sanctioned way any
@@ -85,18 +91,101 @@ class FilesPlugin(LunaPlugin):
                 registry.register("storage", provider)
             log.info("plugin-files registered StorageProvider (key=storage)")
 
-        async def _file_list(path: str = "/") -> dict[str, Any]:
-            entries = await storage.list(path)
+        def _entry_dict(e: Any) -> dict[str, Any]:
             return {
+                "path": e.path, "name": e.name, "is_dir": e.is_dir,
+                "size_bytes": e.size_bytes, "mime_type": e.mime_type,
+            }
+
+        async def _file_list(path: str = "/", recursive: bool = False) -> dict[str, Any]:
+            # P3.1: recursive=true walks every subfolder (capped by the backend).
+            entries = await (storage.walk(path) if recursive else storage.list(path))
+            out: dict[str, Any] = {
                 "path": path,
-                "entries": [
-                    {
-                        "path": e.path, "name": e.name, "is_dir": e.is_dir,
-                        "size_bytes": e.size_bytes, "mime_type": e.mime_type,
-                    }
-                    for e in entries
-                ],
+                "entries": [_entry_dict(e) for e in entries],
                 "count": len(entries),
+            }
+            if recursive:
+                out["recursive"] = True
+            return out
+
+        def _name_matches(query: str, entry: Any) -> bool:
+            q = query.lower()
+            if any(ch in q for ch in "*?["):
+                import fnmatch
+
+                return fnmatch.fnmatch(entry.name.lower(), q) or fnmatch.fnmatch(
+                    entry.path.lower(), q
+                )
+            return q in entry.path.lower()
+
+        async def _file_search(
+            query: str, path: str = "/", in_content: bool = False
+        ) -> dict[str, Any]:
+            """P3.1: find files anywhere under ``path`` by name (substring or
+            glob on the relative path) and optionally by content (case-
+            insensitive line grep over text files, capped). The store's
+            answer to "do we have anything on X?" in ONE call — a walk over
+            every folder, not the top level."""
+            q = (query or "").strip()
+            if not q:
+                return {"error": "query is required"}
+            entries = await storage.walk(path)
+            files = [e for e in entries if not e.is_dir]
+            matches: list[dict[str, Any]] = []
+            name_hits = 0
+            for e in entries:
+                if _name_matches(q, e):
+                    name_hits += 1
+                    if len(matches) < _SEARCH_MAX_RESULTS:
+                        matches.append({**_entry_dict(e), "match": "name"})
+            scanned = 0
+            content_hits = 0
+            skipped_large = 0
+            if in_content:
+                ql = q.lower()
+                seen = {m["path"] for m in matches}
+                for e in files:
+                    if scanned >= _SEARCH_MAX_SCAN or len(matches) >= _SEARCH_MAX_RESULTS:
+                        break
+                    if e.size_bytes and e.size_bytes > _SEARCH_CONTENT_BYTE_CAP:
+                        skipped_large += 1
+                        continue
+                    scanned += 1
+                    try:
+                        text = (await storage.read(e.path)).decode("utf-8")
+                    except (UnicodeDecodeError, FileNotFoundError, OSError):
+                        continue
+                    lines = [
+                        {"line": i + 1, "text": ln[:200]}
+                        for i, ln in enumerate(text.splitlines())
+                        if ql in ln.lower()
+                    ]
+                    if not lines:
+                        continue
+                    content_hits += 1
+                    hit = {
+                        "lines": lines[:_SEARCH_LINES_PER_FILE],
+                        "line_matches": len(lines),
+                    }
+                    if e.path in seen:
+                        for m in matches:
+                            if m["path"] == e.path:
+                                m.update(hit, match="name+content")
+                    else:
+                        matches.append({**_entry_dict(e), "match": "content", **hit})
+            return {
+                "query": q, "path": path, "in_content": in_content,
+                "matches": matches, "count": len(matches),
+                "truncated": (name_hits + content_hits) > len(matches)
+                or scanned >= _SEARCH_MAX_SCAN,
+                "walked": len(entries), "files_scanned": scanned,
+                "skipped_large": skipped_large,
+                "note": (
+                    "No file under this path matches by name"
+                    + (" or content" if in_content else "; try in_content=true")
+                    + "." if not matches else ""
+                ),
             }
 
         async def _file_read(
@@ -239,11 +328,32 @@ class FilesPlugin(LunaPlugin):
             ctx.tool_registry.register(self.manifest.name, defn, handler)
 
         _register(ToolDef(
-            name="file_list", description="List files and folders in a directory of the owner's file store (always available; no skill needed).",
-            parameters={"type": "object", "properties": {"path": {"type": "string", "description": "Directory path (default: /)"}}, "required": []},
+            name="file_list", description="List files and folders in a directory of the owner's file store (always available; no skill needed). recursive=true walks every subfolder.",
+            parameters={"type": "object", "properties": {
+                "path": {"type": "string", "description": "Directory path (default: /)"},
+                "recursive": {"type": "boolean", "description": "Include every subfolder's contents (default false)."},
+            }, "required": []},
             policy="auto_approve", risk_level="low",
             modes=["planning", "building", "identify", "fix_approve", "fix_publish"],
         ), _file_list, gated=False)
+
+        _register(ToolDef(
+            name="file_search",
+            description=(
+                "Find files anywhere in the owner's file store (always available; "
+                "no skill needed): walks every folder under path and matches the "
+                "query against file paths (substring, or a glob like '*.md'); "
+                "in_content=true also greps text files line by line. Use this "
+                "before saying a file or note does not exist."
+            ),
+            parameters={"type": "object", "properties": {
+                "query": {"type": "string", "description": "Name/path substring, glob, or (with in_content) text to grep."},
+                "path": {"type": "string", "description": "Folder to search under (default: /)."},
+                "in_content": {"type": "boolean", "description": "Also search inside text files (default false)."},
+            }, "required": ["query"]},
+            policy="auto_approve", risk_level="low",
+            modes=["planning", "building", "identify", "fix_approve", "fix_publish"],
+        ), _file_search, gated=False)
 
         _register(ToolDef(
             name="file_read",
@@ -311,16 +421,19 @@ class FilesPlugin(LunaPlugin):
                     description=(
                         "Write, create folders, move, and delete files in the "
                         "owner's file store. Reading is always available "
-                        "(file_list, file_read, file_storage_status need no "
-                        "skill) — load this before you need to write, move "
-                        "or delete; those tools unlock after loading."
+                        "(file_list, file_search, file_read, file_storage_status "
+                        "need no skill) — load this before you need to write, "
+                        "move or delete; those tools unlock after loading."
                     ),
                     body=(
                         "# File storage\n\n"
-                        "Always available, no skill needed: file_list, "
-                        "file_read, file_storage_status — check the store "
-                        "with them in the same turn the owner asks about "
-                        "their files.\n"
+                        "Always available, no skill needed: file_list "
+                        "(recursive=true for the whole tree), file_search "
+                        "(name/glob, in_content=true to grep), file_read, "
+                        "file_storage_status — check the store with them in "
+                        "the same turn the owner asks about their files; a "
+                        "file_search over / is the way to say 'not in the "
+                        "store'.\n"
                         "Unlocked by this skill: file_write, file_mkdir, "
                         "file_delete, file_move.\n\n"
                         "- Paths are absolute from the store root, e.g. "

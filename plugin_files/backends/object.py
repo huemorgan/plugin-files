@@ -141,6 +141,49 @@ class ObjectBackend(StorageBackend):
         out.sort(key=lambda e: (not e.is_dir, e.name.lower()))
         return out
 
+    async def walk(self, path: str = "/") -> list[FileEntry]:
+        # plans/002 P3.1: no Delimiter → every key under the prefix; folders
+        # are synthesized from the key paths (dir markers and implied parents).
+        from ..storage import WALK_MAX_ENTRIES
+
+        rel = sanitize_rel(path)
+        base = self._key(rel)
+        if base and not base.endswith("/"):
+            base += "/"
+        out: list[FileEntry] = []
+        dirs: set[str] = set()
+        token: str | None = None
+        while len(out) < WALK_MAX_ENTRIES:
+            kwargs: dict = {"Bucket": self._bucket, "Prefix": base}
+            if token:
+                kwargs["ContinuationToken"] = token
+            resp = await self._call("list_objects_v2", **kwargs)
+            for obj in resp.get("Contents", []) or []:
+                key = obj["Key"]
+                if key == base:
+                    continue
+                relp = self._rel_from_key(key.rstrip("/"))
+                parts = relp.split("/")
+                for i in range(1, len(parts)):
+                    dirs.add("/".join(parts[:i]))
+                if key.endswith("/"):
+                    dirs.add(relp)
+                    continue
+                out.append(FileEntry(
+                    relp, parts[-1], False, obj.get("Size", 0),
+                    mimetypes.guess_type(parts[-1])[0],
+                    obj.get("LastModified") or _now(), obj.get("LastModified") or _now(),
+                ))
+            token = resp.get("NextContinuationToken") if resp.get("IsTruncated") else None
+            if not token:
+                break
+        for d in dirs:
+            if rel and not d.startswith(f"{rel}/"):
+                continue  # implied parent above the walk root
+            out.append(FileEntry(d, d.rsplit("/", 1)[-1], True, None, None, _now(), _now()))
+        out.sort(key=lambda e: e.path.lower())
+        return out[:WALK_MAX_ENTRIES]
+
     async def read(self, path: str) -> bytes:
         try:
             resp = await self._call("get_object", Bucket=self._bucket, Key=self._key(path))

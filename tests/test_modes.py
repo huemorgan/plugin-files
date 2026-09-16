@@ -15,7 +15,7 @@ WRITE_MODES = ["planning", "building", "fix_approve", "fix_publish"]
 READ_MODES = ["planning", "building", "identify", "fix_approve", "fix_publish"]
 
 WRITE_TOOLS = {"file_write", "file_mkdir", "file_delete", "file_move"}
-READ_TOOLS = {"file_list", "file_read", "file_storage_status"}
+READ_TOOLS = {"file_list", "file_search", "file_read", "file_storage_status"}
 
 
 class _ToolReg:

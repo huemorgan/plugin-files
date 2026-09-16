@@ -1,6 +1,6 @@
 name = "plugin-files"
 shown_name = "Files"
-version = "0.14.0"
+version = "0.15.0"
 description = "File storage + a standalone file-browser UI, with agent file tools."
 entry = "plugin_files"
 sdk_version = "0"
@@ -37,11 +37,17 @@ Source: https://github.com/huemorgan/plugin-files
 """
 
 [requires]
-tools = 7
+tools = 8
 
 [[tools]]
 name = "file_list"
-description = "List files and folders in a directory of the owner's file store (always available; no skill needed)."
+description = "List files and folders in a directory of the owner's file store (always available; no skill needed). recursive=true walks every subfolder."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "file_search"
+description = "Find files anywhere in the store by path substring/glob, optionally grepping text content (always available; no skill needed)."
 policy = "auto_approve"
 risk_level = "low"
 

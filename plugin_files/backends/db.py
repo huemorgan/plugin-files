@@ -86,6 +86,21 @@ class DbBackend(StorageBackend):
         out.sort(key=lambda e: (not e.is_dir, e.name.lower()))
         return out
 
+    async def walk(self, path: str = "/") -> list[FileEntry]:
+        # plans/002 P3.1: the same prefix query without the "no deeper slash"
+        # predicate — one round-trip for the whole subtree.
+        from ..storage import WALK_MAX_ENTRIES
+
+        prefix = sanitize_rel(path)
+        stmt = select(FileBlobRow)
+        if prefix:
+            stmt = stmt.where(FileBlobRow.path.like(f"{prefix}/%"))
+        stmt = stmt.order_by(FileBlobRow.path).limit(WALK_MAX_ENTRIES)
+        async with self._sf() as session:
+            res = await session.execute(stmt)
+            rows = res.scalars().all()
+        return [self._entry(row) for row in rows]
+
     async def read(self, path: str) -> bytes:
         p = sanitize_rel(path)
         async with self._sf() as session:

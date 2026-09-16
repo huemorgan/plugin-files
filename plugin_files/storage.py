@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Any
 
 _DEFAULT_ROOT = str(Path.home() / ".luna" / "files")
+# plans/002 P3.1: ceiling on a recursive walk (file_list recursive / file_search).
+WALK_MAX_ENTRIES = int(os.environ.get("LUNA_FILES_WALK_MAX_ENTRIES", "5000"))
 
 
 @dataclass
@@ -85,6 +87,22 @@ class StorageBackend(ABC):
     @abstractmethod
     async def list(self, path: str = "/") -> list[FileEntry]:
         ...
+
+    async def walk(self, path: str = "/") -> list[FileEntry]:
+        """plans/002 P3.1: every entry under ``path`` — files AND folders, all
+        depths, parents before children. The generic version breadth-firsts
+        over ``list``; disk/db/object override it with one walk / one query.
+        Capped at ``WALK_MAX_ENTRIES`` so a huge store can't blow a tool result.
+        """
+        out: list[FileEntry] = []
+        queue = [path]
+        while queue and len(out) < WALK_MAX_ENTRIES:
+            cur = queue.pop(0)
+            for e in await self.list(cur):
+                out.append(e)
+                if e.is_dir:
+                    queue.append(e.path)
+        return out[:WALK_MAX_ENTRIES]
 
     @abstractmethod
     async def read(self, path: str) -> bytes:
@@ -214,6 +232,27 @@ class DiskFileStorage(StorageBackend):
                 continue
             entries.append(self._entry(child))
         return entries
+
+    async def walk(self, path: str = "/") -> list[FileEntry]:
+        target = self._resolve(path)
+        if not target.exists() or not target.is_dir():
+            return []
+        out: list[FileEntry] = []
+        for dirpath, dirnames, filenames in os.walk(target):
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+            base = Path(dirpath)
+            for d in dirnames:
+                out.append(self._entry(base / d))
+            for f in sorted(filenames, key=str.lower):
+                if f.startswith("."):
+                    continue
+                try:
+                    out.append(self._entry(base / f))
+                except OSError:  # vanished mid-walk
+                    continue
+            if len(out) >= WALK_MAX_ENTRIES:
+                break
+        return out[:WALK_MAX_ENTRIES]
 
     async def read(self, path: str) -> bytes:
         target = self._resolve(path)
