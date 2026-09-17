@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import pytest
 
 from plugin_files.storage import DiskFileStorage
@@ -65,6 +66,47 @@ class TestDiskFileStorage:
         usage = await storage.usage()
         assert usage["used_bytes"] == 5
         assert usage["max_bytes"] == 1024 * 1024
+
+    async def test_two_instances_share_a_quota_decision(self, tmp_path, monkeypatch) -> None:
+        first = DiskFileStorage(root=tmp_path, max_bytes=10, max_file_bytes=10)
+        second = DiskFileStorage(root=tmp_path, max_bytes=10, max_file_bytes=10)
+        original_usage = DiskFileStorage.usage
+        ready = asyncio.Event()
+        probes = 0
+
+        async def delayed_usage(instance):
+            nonlocal probes
+            result = await original_usage(instance)
+            probes += 1
+            if probes == 2:
+                ready.set()
+            try:
+                await asyncio.wait_for(ready.wait(), timeout=0.1)
+            except TimeoutError:
+                pass
+            return result
+
+        monkeypatch.setattr(DiskFileStorage, "usage", delayed_usage)
+        outcomes = await asyncio.gather(first.write("one", b"123456"),
+                                        second.write("two", b"abcdef"),
+                                        return_exceptions=True)
+        assert sum(not isinstance(x, Exception) for x in outcomes) == 1
+        assert sum(isinstance(x, ValueError) for x in outcomes) == 1
+        assert (await original_usage(first))["used_bytes"] == 6
+
+    async def test_quota_lock_file_cannot_be_moved_or_deleted(self, storage) -> None:
+        await storage.write("first", b"one")
+        with pytest.raises(ValueError, match="Reserved"):
+            await storage.delete(".luna-quota.lock")
+        with pytest.raises(ValueError, match="Reserved"):
+            await storage.move(".luna-quota.lock", "elsewhere")
+
+    async def test_symlinked_quota_lock_is_not_followed(self, storage, tmp_path) -> None:
+        outside = tmp_path.parent / "outside-lock-target"
+        (tmp_path / ".luna-quota.lock").symlink_to(outside)
+        with pytest.raises(OSError):
+            await storage.write("first", b"one")
+        assert not outside.exists()
 
     async def test_list_sorted_dirs_first(self, storage) -> None:
         await storage.write("z_file.txt", b"data")

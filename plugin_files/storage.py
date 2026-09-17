@@ -11,10 +11,14 @@ interface, many implementations, a single set of callers.
 
 from __future__ import annotations
 
+import asyncio
+import fcntl
 import mimetypes
 import os
 import shutil
+import tempfile
 from abc import ABC, abstractmethod
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -174,6 +178,23 @@ class DiskFileStorage(StorageBackend):
         self._durability_reason = durability_reason or (
             "durable disk" if durable else "ephemeral container disk"
         )
+        self._write_lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def _quota_guard(self):
+        """Serialize quota decisions across instances and worker processes."""
+        async with self._write_lock:
+            descriptor = os.open(
+                self._root / ".luna-quota.lock",
+                os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+                0o600,
+            )
+            with os.fdopen(descriptor, "r+b") as lock_file:
+                await asyncio.to_thread(fcntl.flock, lock_file.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    await asyncio.to_thread(fcntl.flock, lock_file.fileno(), fcntl.LOCK_UN)
 
     @property
     def root(self) -> Path:
@@ -185,8 +206,10 @@ class DiskFileStorage(StorageBackend):
         if not clean or clean == ".":
             return self._root
         resolved = (self._root / clean).resolve()
-        if not str(resolved).startswith(str(self._root)):
+        if not resolved.is_relative_to(self._root):
             raise ValueError(f"Path traversal blocked: {path}")
+        if resolved == self._root / ".luna-quota.lock":
+            raise ValueError("Reserved storage control path")
         return resolved
 
     def _rel(self, absolute: Path) -> str:
@@ -246,10 +269,31 @@ class DiskFileStorage(StorageBackend):
     async def write(self, path: str, content: bytes, mime_type: str | None = None) -> FileEntry:
         if len(content) > self._max_file_bytes:
             raise ValueError(f"File too large: {len(content)} bytes (max {self._max_file_bytes})")
-        target = self._resolve(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(content)
-        return self._entry(target)
+        async with self._quota_guard():
+            target = self._resolve(path)
+            if target == self._root or target.is_dir():
+                raise ValueError(f"Expected file path: {path}")
+            used = (await self.usage())["used_bytes"]
+            old_size = target.stat().st_size if target.exists() else 0
+            if used - old_size + len(content) > self._max_bytes:
+                raise ValueError(f"Storage quota exceeded: max {self._max_bytes} bytes")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            # Resolve once more after creating parents, in case a pre-existing
+            # symlink was encountered while building the path.
+            if self._resolve(path) != target:
+                raise ValueError(f"Path traversal blocked: {path}")
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".luna-write-", delete=False) as stream:
+                    temporary = Path(stream.name)
+                    stream.write(content)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, target)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
+            return self._entry(target)
 
     async def mkdir(self, path: str) -> FileEntry:
         target = self._resolve(path)
@@ -258,6 +302,8 @@ class DiskFileStorage(StorageBackend):
 
     async def delete(self, path: str) -> bool:
         target = self._resolve(path)
+        if target == self._root:
+            raise ValueError("Cannot delete the configured file root")
         if not target.exists():
             return False
         if target.is_dir():
@@ -269,6 +315,8 @@ class DiskFileStorage(StorageBackend):
     async def move(self, src: str, dst: str) -> FileEntry:
         src_path = self._resolve(src)
         dst_path = self._resolve(dst)
+        if src_path == self._root or dst_path == self._root:
+            raise ValueError("Cannot move the configured file root")
         if not src_path.exists():
             raise FileNotFoundError(src)
         dst_path.parent.mkdir(parents=True, exist_ok=True)
@@ -290,7 +338,8 @@ class DiskFileStorage(StorageBackend):
             for f in filenames:
                 fp = os.path.join(dirpath, f)
                 try:
-                    total += os.path.getsize(fp)
+                    if not os.path.islink(fp):
+                        total += os.path.getsize(fp)
                 except OSError:
                     pass
         return {"used_bytes": total, "max_bytes": self._max_bytes}
